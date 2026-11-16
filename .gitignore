@@ -1,0 +1,10 @@
+.env
+__pycache__/
+*.py[cod]
+.venv/
+node_modules/
+dist/
+perimeter_monitor.db
+evidence/**
+!evidence/.gitkeep
+models/*.pt
