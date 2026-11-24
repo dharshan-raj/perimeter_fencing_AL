@@ -11,7 +11,7 @@ class PersonDetector:
             log.warning("Configured model %s is missing; using pretrained yolov8n.pt",path)
             self.model=YOLO("yolov8n.pt")
     def detect_track(self, frame):
-        result=self.model.track(frame, persist=True, classes=[0], conf=settings.person_confidence, iou=settings.iou_threshold, tracker="bytetrack.yaml", verbose=False)[0]
+        result=self.model.track(frame, persist=True, classes=[0], conf=settings.person_confidence, iou=settings.iou_threshold, imgsz=480, tracker="bytetrack.yaml", verbose=False)[0]
         out=[]
         if result.boxes is None: return out
         for box in result.boxes:

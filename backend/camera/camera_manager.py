@@ -1,9 +1,10 @@
-﻿import threading, time, logging, cv2
+import threading, time, logging, cv2, math
 from datetime import datetime, timezone
 from pathlib import Path
 from ..config import settings
 from ..database import SessionLocal
-from ..models import Camera, Alert, DetectionLog, SystemLog
+from ..models import Camera, Alert, DetectionLog, SystemLog, HeadcountEvent
+from ..headcount.headcount_manager import HeadcountManager
 from ..detection.detector import PersonDetector
 from ..detection.zone_manager import ZoneManager
 from ..detection.intrusion_detector import IntrusionDetector
@@ -32,6 +33,24 @@ class CameraManager:
         self.reconnect_attempt = 0
         self.retry_in_seconds = 0.0
         self.connection_lock = threading.Lock()
+        # Headcount uses the SAME detected people and frames as perimeter monitoring.
+        # Its virtual counting line is configured independently in config/gates.json.
+        self.headcount = HeadcountManager()
+        # ── Face recognition (loaded lazily after first frame) ──────────────
+        self.face_registry = None
+        self.track_identifier = None          # multi-frame identity (face v2)
+        self._face_registry_loaded = False   # True once load attempted (even if failed)
+        self._face_cache: dict = {}           # {tracking_id: (name, timestamp)}
+        self._face_cache_ttl = 3.0           # re-recognise each track every 3 s
+        # ── Companion Gate 3 IN Camera (Channel 1) ──────────────────────────
+        self.in_thread = None
+        self.in_stream = None
+        self.in_status = "Disconnected"
+        self.in_video_status = "Disconnected"
+        self.last_in_frame = None
+        self.in_people = []
+        self.in_track_identifier = None
+        self._in_face_cache: dict = {}
 
     def start(self):
         if self.thread and self.thread.is_alive():
@@ -43,6 +62,10 @@ class CameraManager:
         self.retry_in_seconds = 0.0
         self.thread = threading.Thread(target=self._run, daemon=True, name="camera-processor")
         self.thread.start()
+        if settings.dual_gate_cameras and settings.source_in and settings.source_in != settings.source:
+            self.in_status = "Reconnecting"
+            self.in_thread = threading.Thread(target=self._run_in_camera, daemon=True, name="camera-in-processor")
+            self.in_thread.start()
         return True
 
     def stop(self):
@@ -210,7 +233,7 @@ class CameraManager:
                     db.commit()
                 video_was_connected = True
 
-                # Initialize YOLO after the first valid decoded frame, then reuse it.
+                 # Initialize YOLO after the first valid decoded frame, then reuse it.
                 if detector is None:
                     if time.monotonic() < next_detector_retry:
                         self.stop_event.wait(0.1)
@@ -226,6 +249,29 @@ class CameraManager:
                         self.stop_event.wait(0.1)
                         continue
 
+                # ── Lazy-load face registry once detector is ready ──────────
+                if not self._face_registry_loaded:
+                    try:
+                        from ..face_recognition.employee_registry import EmployeeRegistry
+                        registry = EmployeeRegistry("backend/employee_face")
+                        registry.load_employees(max_photos_per_employee=settings.face_max_photos)
+                        self.face_registry = registry
+                        if settings.face_v2_enabled:
+                            try:
+                                from ..face_recognition.track_identifier import TrackIdentifier
+                                self.track_identifier = TrackIdentifier.from_settings(registry, settings)
+                                log.info("Face recognition v2 (multi-frame) enabled")
+                            except Exception as exc:
+                                log.warning("Face recognition v2 unavailable, using v1: %s", exc)
+                        log.info(
+                            "Employee face registry loaded: %d employees",
+                            len(registry.employee_embeddings),
+                        )
+                    except Exception as exc:
+                        log.warning("Face recognition registry could not load: %s", exc)
+                    finally:
+                        self._face_registry_loaded = True  # don't retry every frame
+
                 if time.time() - last_inference < 1 / max(settings.inference_fps, 0.1):
                     continue
                 last_inference = time.time()
@@ -237,6 +283,140 @@ class CameraManager:
                     db.add(SystemLog(log_level="ERROR", message="Video processing failed: " + str(exc)[:300]))
                     db.commit()
                     continue
+
+                # ── Per-person face recognition (cached per tracking-ID) ────
+                _now = time.time()
+                _v2_done = False
+                if self.track_identifier is not None:
+                    try:
+                        self.track_identifier.update_async(people, frame, _now)
+                        for _p in people:
+                            if _p.get("identity_state") == "IDENTIFIED":
+                                # Keeps the Gate 3 attendance fallback lookup working.
+                                self._face_cache[_p["id"]] = (_p["name"], _now)
+                        _v2_done = True
+                    except Exception:
+                        log.exception("Face recognition v2 failed; falling back to v1")
+                for _person in ([] if _v2_done else people):
+                    _tid = _person["id"]
+                    _cached = self._face_cache.get(_tid)
+                    # If this person is already recognized as an employee, keep the name!
+                    # Do not re-run CPU face recognition on an already matched employee.
+                    if _cached:
+                        if _cached[0] != "Unknown":
+                            _person["name"] = _cached[0]
+                            continue
+                        # If previously Unknown, only retry after cache TTL
+                        if _now - _cached[1] < self._face_cache_ttl:
+                            _person["name"] = _cached[0]
+                            continue
+
+                    if self.face_registry is not None:
+                        try:
+                            _x1, _y1, _x2, _y2 = _person["box"]
+                            # Use the upper 45 % of the bounding box as the face region
+                            _face_h = max(1, math.ceil((_y2 - _y1) * 0.45))
+                            _face_crop = frame[
+                                max(0, _y1) : _y1 + _face_h,
+                                max(0, _x1) : max(_x1 + 1, _x2),
+                            ]
+                            if _face_crop.size > 0:
+                                _result = self.face_registry.recognize_employee(_face_crop)
+                                _name = (
+                                    _result["employee_id"].capitalize()
+                                    if _result["status"] == "MATCHED"
+                                    else "Unknown"
+                                )
+                            else:
+                                _name = "Unknown"
+                        except Exception:
+                            _name = "Unknown"
+                    else:
+                        _name = "Unknown"
+                    self._face_cache[_tid] = (_name, _now)
+                    _person["name"] = _name
+                # Evict cache entries for tracks that are no longer visible
+                _active_ids = {p["id"] for p in people}
+                self._face_cache = {k: v for k, v in self._face_cache.items() if k in _active_ids}
+
+                # ---------------------------------------------------------
+                # NEW: GATE 3 HEADCOUNT PROCESSING
+                # Reuses the exact same YOLO + ByteTrack detections. No second
+                # camera capture or second YOLO inference is created.
+                # HeadcountManager.process() returns only confirmed crossings.
+                # ---------------------------------------------------------
+                headcount_payloads = []
+                try:
+                    use_dual = bool(self.in_thread and self.in_thread.is_alive())
+                    headcount_events = (
+                        self.headcount.process_out(people=people, frame_shape=frame.shape)
+                        if use_dual
+                        else self.headcount.process(people=people, frame_shape=frame.shape)
+                    ) or []
+
+                    for event in headcount_events:
+                        event_key = str(event.get("event_key") or f"{event.get('gate_name')}_{event.get('tracking_id')}_{event.get('direction')}_{int(time.time())}")
+
+                        # Extra database-level duplicate check. The unique
+                        # constraint on HeadcountEvent.event_key is the final guard.
+                        already_saved = db.query(HeadcountEvent.id).filter_by(
+                            event_key=event_key
+                        ).first()
+                        if already_saved:
+                            continue
+
+                        event_timestamp = event.get("event_timestamp")
+                        if not isinstance(event_timestamp, datetime):
+                            event_timestamp = datetime.now(timezone.utc)
+
+                        # Match tracking ID to employee name from recognition
+                        # Line counter returns tracking_id as str; detector ids are int.
+                        _evt_tid = str(event.get("tracking_id"))
+                        _emp_name = event.get("employee_name")
+                        if not _emp_name:
+                            for p in people:
+                                if str(p["id"]) == _evt_tid:
+                                    n = p.get("name")
+                                    if n and n != "Unknown":
+                                        _emp_name = n
+                                    break
+                        if not _emp_name:
+                            for k, c in self._face_cache.items():
+                                if str(k) == _evt_tid and c[0] and c[0] != "Unknown":
+                                    _emp_name = c[0]
+                                    break
+
+                        db.add(HeadcountEvent(
+                            camera_id=cam_id,
+                            gate_name=event.get("gate_name", "Plant Entrance Gate 3"),
+                            tracking_id=str(event["tracking_id"]),
+                            employee_name=_emp_name,
+                            direction=str(event["direction"]).upper(),
+                            event_key=event_key,
+                            confidence=event.get("confidence"),
+                            event_timestamp=event_timestamp
+                        ))
+
+                        headcount_payloads.append({
+                            "event_type": "Headcount Event",
+                            "severity": "INFO",
+                            "gate_name": event.get("gate_name", "Plant Entrance Gate 3"),
+                            "camera_id": cam_id,
+                            "tracking_id": str(event["tracking_id"]),
+                            "employee_name": _emp_name,
+                            "direction": str(event["direction"]).upper(),
+                            "confidence": event.get("confidence"),
+                            "event_timestamp": event_timestamp.isoformat()
+                        })
+
+                except Exception as exc:
+                    # A headcount configuration/processing issue must not stop
+                    # the existing perimeter intrusion detection pipeline.
+                    log.exception("Gate 3 headcount processing failed")
+                    db.add(SystemLog(
+                        log_level="ERROR",
+                        message="Headcount processing failed: " + str(exc)[:300]
+                    ))
 
                 for person in people:
                     tracking_id = person["id"]
@@ -268,6 +448,10 @@ class CameraManager:
                     publish_from_thread(payload, critical)
                 db.commit()
 
+                # Broadcast headcount events only after the database commit.
+                for headcount_payload in headcount_payloads:
+                    publish_from_thread(headcount_payload, False)
+
         except Exception as exc:
             log.exception("Camera worker stopped")
             if db:
@@ -292,6 +476,129 @@ class CameraManager:
             self.status = "Stopped" if self.stop_event.is_set() else "Disconnected"
             self.retry_in_seconds = 0.0
             log.info("Camera worker stopped with status %s", self.status)
+
+    def _run_in_camera(self):
+        """Dedicated worker for Gate 3 IN Camera (Channel 1)."""
+        from ..main import publish_from_thread
+
+        db = None
+        stream = RTSPStream(settings.source_in, "rtsp")
+        self.in_stream = stream
+        detector = None
+        last_inference = 0.0
+        cam_id = None
+
+        try:
+            db = SessionLocal()
+            camera = db.query(Camera).filter_by(camera_name=settings.camera_name).first()
+            cam_id = camera.id if camera else 1
+
+            while not self.stop_event.is_set():
+                ok, frame = stream.read()
+                if not ok or frame is None:
+                    self.in_video_status = "Disconnected"
+                    self.in_status = "Reconnecting"
+                    self.in_people = []
+                    if self.stop_event.wait(0.2):
+                        break
+                    continue
+
+                self.in_video_status = "Connected"
+                self.in_status = "Connected"
+                self.last_in_frame = frame.copy()
+
+                if detector is None:
+                    try:
+                        detector = PersonDetector()
+                    except Exception:
+                        self.stop_event.wait(1.0)
+                        continue
+
+                if self.in_track_identifier is None and self.face_registry is not None and settings.face_v2_enabled:
+                    try:
+                        from ..face_recognition.track_identifier import TrackIdentifier
+                        self.in_track_identifier = TrackIdentifier.from_settings(self.face_registry, settings)
+                    except Exception:
+                        pass
+
+                if time.time() - last_inference < 1 / max(settings.inference_fps, 0.1):
+                    continue
+                last_inference = time.time()
+
+                try:
+                    people = detector.detect_track(frame)
+                    self.in_people = people
+                except Exception:
+                    continue
+
+                _now = time.time()
+                if self.in_track_identifier is not None:
+                    try:
+                        self.in_track_identifier.update_async(people, frame, _now)
+                        for _p in people:
+                            if _p.get("identity_state") == "IDENTIFIED":
+                                self._in_face_cache[_p["id"]] = (_p["name"], _now)
+                    except Exception:
+                        pass
+
+                try:
+                    in_events = self.headcount.process_in(people=people, frame_shape=frame.shape) or []
+                    payloads = []
+                    for event in in_events:
+                        event_key = str(event.get("event_key") or f"Gate3_CH1_{event.get('tracking_id')}_IN_{int(time.time())}")
+                        if db.query(HeadcountEvent.id).filter_by(event_key=event_key).first():
+                            continue
+                        event_timestamp = event.get("event_timestamp")
+                        if not isinstance(event_timestamp, datetime):
+                            event_timestamp = datetime.now(timezone.utc)
+                        _evt_tid = str(event.get("tracking_id"))
+                        _emp_name = event.get("employee_name")
+                        if not _emp_name:
+                            for p in people:
+                                if str(p["id"]) == _evt_tid and p.get("name") and p.get("name") != "Unknown":
+                                    _emp_name = p.get("name")
+                                    break
+                        if not _emp_name:
+                            for k, c in self._in_face_cache.items():
+                                if str(k) == _evt_tid and c[0] and c[0] != "Unknown":
+                                    _emp_name = c[0]
+                                    break
+                        db.add(HeadcountEvent(
+                            camera_id=cam_id,
+                            gate_name=event.get("gate_name", "Gate 3"),
+                            tracking_id=_evt_tid,
+                            employee_name=_emp_name,
+                            direction="IN",
+                            event_key=event_key,
+                            confidence=event.get("confidence"),
+                            event_timestamp=event_timestamp,
+                        ))
+                        payloads.append({
+                            "event_type": "Headcount Event",
+                            "severity": "INFO",
+                            "gate_name": event.get("gate_name", "Gate 3"),
+                            "camera_id": cam_id,
+                            "tracking_id": _evt_tid,
+                            "employee_name": _emp_name,
+                            "direction": "IN",
+                            "confidence": event.get("confidence"),
+                            "event_timestamp": event_timestamp.isoformat(),
+                        })
+                    if payloads:
+                        db.commit()
+                        for pl in payloads:
+                            publish_from_thread(pl, False)
+                except Exception:
+                    log.exception("Gate 3 IN camera processing failed")
+        finally:
+            stream.release()
+            self.in_stream = None
+            if db:
+                db.close()
+            self.in_people = []
+            self.last_in_frame = None
+            self.in_video_status = "Disconnected"
+            self.in_status = "Stopped" if self.stop_event.is_set() else "Disconnected"
 
 
 camera_manager = CameraManager()

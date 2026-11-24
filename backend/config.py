@@ -13,6 +13,9 @@ class Settings(BaseSettings):
     rtsp_port: int = 554
     rtsp_channel: int = 1
     rtsp_subtype: int = 0
+    dual_gate_cameras: bool = True
+    rtsp_url_in: str = ""
+    rtsp_channel_in: int = 1
     video_source: str = "rtsp"
     webcam_index: int = 0
     sample_video_path: str = ""
@@ -30,6 +33,19 @@ class Settings(BaseSettings):
     person_confidence: float = 0.45
     iou_threshold: float = 0.45
     inference_fps: float = 8
+    # --- Face recognition v2 (multi-frame identification of tracked people) ---
+    face_v2_enabled: bool = True
+    face_max_photos: int = 15
+    face_match_threshold: float = 0.40
+    face_match_margin: float = 0.05
+    face_votes_required: int = 2
+    face_min_person_height: int = 150
+    face_min_face_px: int = 32
+    face_min_det_score: float = 0.5
+    face_min_blur: float = 15.0
+    face_unknown_attempts: int = 5
+    face_retry_interval: float = 0.6
+    face_max_per_cycle: int = 1
     alert_cooldown: int = 30
     boundary_mode: str = "crossing"
     approach_distance: int = 35
@@ -64,4 +80,19 @@ class Settings(BaseSettings):
         if kind == "file":
             return self.sample_video_path if self.video_source.strip().lower() in ("file", "video") else self.video_source
         return self.video_source
+
+    @property
+    def source_in(self):
+        """RTSP URL for the dedicated Gate 3 IN camera (Channel 1)."""
+        if not self.dual_gate_cameras or self.source_kind != "rtsp":
+            return ""
+        if self.rtsp_url_in.strip():
+            return self.rtsp_url_in.strip()
+        if self.rtsp_ip.strip():
+            username = quote(unquote(self.rtsp_username), safe="")
+            password = quote(unquote(self.rtsp_password), safe="")
+            auth = f"{username}:{password}@" if username or password else ""
+            return (f"rtsp://{auth}{self.rtsp_ip.strip()}:{self.rtsp_port}"
+                    f"/cam/realmonitor?channel={self.rtsp_channel_in}&subtype={self.rtsp_subtype}")
+        return ""
 settings = Settings()

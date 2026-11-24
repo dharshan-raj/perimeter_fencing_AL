@@ -1,0 +1,57 @@
+{
+    "gates": [
+        {
+            "gate_id": "gate_3",
+            "gate_name": "Gate 3",
+            "enabled": true,
+            "camera_name": "Perimeter Camera",
+            "two_lines": true,
+            "line_in": {
+                "start": [
+                    600,
+                    400
+                ],
+                "end": [
+                    856,
+                    450
+                ],
+                "entry_direction": "A_TO_B",
+                "label": "IN"
+            },
+            "line_out": {
+                "start": [
+                    500,
+                    450
+                ],
+                "end": [
+                    895,
+                    500
+                ],
+                "entry_direction": "B_TO_A",
+                "label": "OUT"
+            },
+            "line": {
+                "start": [
+                    680,
+                    422
+                ],
+                "end": [
+                    800,
+                    450
+                ],
+                "entry_direction": "A_TO_B"
+            },
+            "detection": {
+                "confidence_threshold": 0.35,
+                "confirmation_frames": 1,
+                "cooldown_seconds": 3.0,
+                "line_margin": 50
+            },
+            "monitoring": {
+                "count_entry": true,
+                "count_exit": true,
+                "save_events": true
+            }
+        }
+    ]
+}
