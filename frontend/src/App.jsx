@@ -357,17 +357,23 @@ function HeadcountPage({ cameraProps }) {
   const [events, setEvents] = useState([]);
   const [attendance, setAttendance] = useState([]);
   const [report, setReport] = useState(null);
+  const [isDualCamera, setIsDualCamera] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
   const loadHeadcount = async () => {
     try {
-      const [liveData, eventData, reportData, attendanceData] = await Promise.all([
+      const [liveData, eventData, reportData, attendanceData, statusData] = await Promise.all([
         get('/api/headcount/live?gate_name=Gate%203'),
         get('/api/headcount/events?gate_name=Gate%203&limit=25'),
         get('/api/headcount/reports/daily?gate_name=Gate%203'),
         get('/api/headcount/attendance/today'),
+        get('/api/cameras/14/status').catch(() => null),
       ]);
+
+      if (statusData && typeof statusData.dual_gate_cameras === 'boolean') {
+        setIsDualCamera(statusData.dual_gate_cameras);
+      }
 
       setHeadcount({
         total_in: liveData.total_in ?? 0,
@@ -436,31 +442,33 @@ function HeadcountPage({ cameraProps }) {
           style={{
             marginBottom: '1.25rem',
             display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))',
+            gridTemplateColumns: isDualCamera ? 'repeat(auto-fit, minmax(420px, 1fr))' : '1fr',
             gap: '1rem',
           }}
         >
-          <section className="panel camera-panel">
-            <div className="panel-heading">
-              <div>
-                <span className="section-kicker" style={{ color: '#34d399' }}>
-                  CHANNEL 1 · ENTRY CAMERA
+          {isDualCamera && (
+            <section className="panel camera-panel">
+              <div className="panel-heading">
+                <div>
+                  <span className="section-kicker" style={{ color: '#34d399' }}>
+                    CHANNEL 1 · ENTRY CAMERA
+                  </span>
+                  <h2>Gate 3 — IN Camera (Channel 1)</h2>
+                </div>
+                <span className="headcount-direction direction-in">
+                  <LogIn size={14} /> IN
                 </span>
-                <h2>Gate 3 — IN Camera (Channel 1)</h2>
               </div>
-              <span className="headcount-direction direction-in">
-                <LogIn size={14} /> IN
-              </span>
-            </div>
-            <div className="camera-stage">
-              <img
-                src="/api/stream_in.mjpg"
-                alt="Gate 3 IN Camera (Channel 1)"
-                className="camera-video"
-                style={{ width: '100%', borderRadius: '0.5rem', display: 'block' }}
-              />
-            </div>
-          </section>
+              <div className="camera-stage">
+                <img
+                  src="/api/stream_in.mjpg"
+                  alt="Gate 3 IN Camera (Channel 1)"
+                  className="camera-video"
+                  style={{ width: '100%', borderRadius: '0.5rem', display: 'block' }}
+                />
+              </div>
+            </section>
+          )}
 
           <div>
             <CameraFeed {...cameraProps} />

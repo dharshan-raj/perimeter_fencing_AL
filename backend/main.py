@@ -214,6 +214,11 @@ def camera_status():
             camera_manager.thread
             and camera_manager.thread.is_alive()
         ),
+        "dual_gate_cameras": bool(
+            settings.dual_gate_cameras
+            and camera_manager.in_thread
+            and camera_manager.in_thread.is_alive()
+        ),
         "auto_start": settings.camera_auto_start,
         "auto_reconnect": settings.camera_auto_reconnect,
         "reconnect_attempt": (
