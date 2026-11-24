@@ -129,3 +129,52 @@ class HeadcountReport(BaseModel):
     opening_count: int = 0
 
     closing_count: int = 0
+
+
+# =========================================================
+# NEW: UNAUTHORISED MOVEMENT SCHEMAS
+# =========================================================
+
+class MovementEventCreate(BaseModel):
+    camera_id: int = Field(gt=0)
+    tracking_id: str
+    employee_id: str | None = None
+    employee_name: str | None = None
+    identity_status: Literal["AUTHORISED", "UNKNOWN", "UNAUTHORISED"]
+    event_type: str
+    zone_name: str
+    severity: Literal["LOW", "MEDIUM", "HIGH", "CRITICAL"] = "HIGH"
+    confidence: float | None = None
+    snapshot_path: str | None = None
+    description: str | None = None
+    event_timestamp: datetime | None = None
+
+
+class MovementEventResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    camera_id: int
+    tracking_id: str
+    employee_id: str | None = None
+    employee_name: str | None = None
+    identity_status: str
+    event_type: str
+    zone_name: str
+    severity: str
+    confidence: float | None = None
+    snapshot_path: str | None = None
+    description: str | None = None
+    event_timestamp: datetime
+    created_at: datetime
+
+
+class MovementSummaryResponse(BaseModel):
+    total_detected: int = 0
+    authorised_count: int = 0
+    unknown_count: int = 0
+    unauthorised_count: int = 0
+    today_violations: int = 0
+    restricted_zones_active: int = 0
+    last_updated: str
+

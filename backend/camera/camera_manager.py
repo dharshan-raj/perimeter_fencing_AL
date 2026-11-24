@@ -3,8 +3,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from ..config import settings
 from ..database import SessionLocal
-from ..models import Camera, Alert, DetectionLog, SystemLog, HeadcountEvent
+from ..models import Camera, Alert, DetectionLog, SystemLog, HeadcountEvent, MovementEvent
 from ..headcount.headcount_manager import HeadcountManager
+from ..movement_security.movement_evaluator import MovementSecurityEngine
 from ..detection.detector import PersonDetector
 from ..detection.zone_manager import ZoneManager
 from ..detection.intrusion_detector import IntrusionDetector
@@ -36,6 +37,8 @@ class CameraManager:
         # Headcount uses the SAME detected people and frames as perimeter monitoring.
         # Its virtual counting line is configured independently in config/gates.json.
         self.headcount = HeadcountManager()
+        # ── Movement Security Engine (Unauthorized Movement Detection) ─────
+        self.movement_security = MovementSecurityEngine()
         # ── Face recognition (loaded lazily after first frame) ──────────────
         self.face_registry = None
         self.track_identifier = None          # multi-frame identity (face v2)
@@ -451,6 +454,65 @@ class CameraManager:
                 # Broadcast headcount events only after the database commit.
                 for headcount_payload in headcount_payloads:
                     publish_from_thread(headcount_payload, False)
+
+                # ── Movement Security: Unauthorised Movement Detection ────────
+                try:
+                    movement_events = self.movement_security.evaluate(
+                        people=people,
+                        camera_id=cam_id or 1,
+                        camera_name=settings.camera_name,
+                    )
+                    for me in movement_events:
+                        # Save snapshot for movement security alert
+                        snapshot_rel_path = None
+                        try:
+                            snap_dir = Path(settings.evidence_dir) / "movement"
+                            snap_dir.mkdir(parents=True, exist_ok=True)
+                            fname = f"movement_{int(me['timestamp'])}_{me['tracking_id']}.jpg"
+                            fpath = snap_dir / fname
+                            cv2.imwrite(str(fpath), frame)
+                            snapshot_rel_path = f"/api/evidence/movement/{fname}"
+                        except Exception as snap_err:
+                            log.debug("Could not save movement snapshot: %s", snap_err)
+
+                        m_record = MovementEvent(
+                            camera_id=me["camera_id"],
+                            tracking_id=str(me["tracking_id"]),
+                            employee_id=me.get("employee_id"),
+                            employee_name=me.get("employee_name"),
+                            identity_status=me["identity_status"],
+                            event_type=me["event_type"],
+                            zone_name=me["zone_name"],
+                            severity=me["severity"],
+                            confidence=me.get("confidence"),
+                            snapshot_path=snapshot_rel_path,
+                            description=me.get("description"),
+                            event_timestamp=me["event_timestamp"],
+                        )
+                        db.add(m_record)
+                        db.commit()
+                        db.refresh(m_record)
+
+                        # Broadcast real-time WebSocket alert
+                        is_crit = me["severity"] in ("CRITICAL", "HIGH")
+                        publish_from_thread({
+                            "event_type": "Movement Security Alert",
+                            "severity": me["severity"],
+                            "alert_type": "UNAUTHORISED MOVEMENT",
+                            "movement_event_id": m_record.id,
+                            "tracking_id": str(me["tracking_id"]),
+                            "employee_name": me.get("employee_name"),
+                            "identity_status": me["identity_status"],
+                            "camera_id": me["camera_id"],
+                            "camera_name": me["camera_name"],
+                            "zone_name": me["zone_name"],
+                            "description": me.get("description"),
+                            "snapshot_path": snapshot_rel_path,
+                            "event_timestamp": me["event_timestamp"].isoformat(),
+                        }, is_crit)
+                except Exception as m_exc:
+                    log.exception("Movement security processing failed: %s", m_exc)
+
 
         except Exception as exc:
             log.exception("Camera worker stopped")

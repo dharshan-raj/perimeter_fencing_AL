@@ -1,0 +1,54 @@
+{
+    "enabled": true,
+    "working_hours": {
+        "enabled": true,
+        "start": "08:00",
+        "end": "19:00",
+        "timezone": "UTC"
+    },
+    "alert_cooldown_seconds": 25,
+    "min_frames_in_zone": 2,
+    "zones": [
+        {
+            "zone_id": "zone_furnace_floor",
+            "zone_name": "Furnace Operational Floor",
+            "zone_type": "RESTRICTED",
+            "polygon": [
+                [350, 200],
+                [850, 200],
+                [850, 680],
+                [350, 680]
+            ],
+            "allowed_roles": ["furnace_operator", "engineer", "admin"],
+            "allowed_employees": ["dharshan", "dinesh", "vishanu"],
+            "after_hours_restricted": true,
+            "severity": "CRITICAL",
+            "color": "#ef4444"
+        },
+        {
+            "zone_id": "zone_controlled_hallway",
+            "zone_name": "Controlled Access Corridor",
+            "zone_type": "CONTROLLED",
+            "polygon": [
+                [100, 150],
+                [350, 150],
+                [350, 680],
+                [100, 680]
+            ],
+            "allowed_roles": ["employee", "staff", "furnace_operator", "engineer", "admin"],
+            "allowed_employees": ["dharshan", "dinesh", "divya", "harini", "mahi", "nikitha", "vishanu"],
+            "after_hours_restricted": true,
+            "severity": "HIGH",
+            "color": "#f97316"
+        }
+    ],
+    "employee_roles": {
+        "dharshan": "furnace_operator",
+        "dinesh": "engineer",
+        "vishanu": "furnace_operator",
+        "divya": "staff",
+        "harini": "staff",
+        "mahi": "staff",
+        "nikitha": "staff"
+    }
+}

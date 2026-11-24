@@ -26,7 +26,12 @@ from sqlalchemy.exc import IntegrityError
 from .config import settings
 from .database import Base, engine, get_db, SessionLocal
 from . import models
-from .schemas import HeadcountEventCreate
+from .schemas import (
+    HeadcountEventCreate,
+    MovementEventCreate,
+    MovementEventResponse,
+    MovementSummaryResponse,
+)
 from .camera.camera_manager import camera_manager
 from .detection.zone_manager import ZoneManager
 from .services.websocket_manager import manager
@@ -1051,3 +1056,175 @@ async def ws_alerts(ws: WebSocket):
 
     except WebSocketDisconnect:
         manager.disconnect(ws)
+
+
+# =========================================================
+# NEW USE CASE: UNAUTHORISED MOVEMENT MONITORING
+# =========================================================
+
+@app.get("/api/movement/events")
+def get_movement_events(
+    camera_id: int | None = Query(None),
+    date_str: str | None = Query(None, alias="date"),
+    event_type: str | None = Query(None),
+    identity_status: str | None = Query(None),
+    severity: str | None = Query(None),
+    employee_name: str | None = Query(None),
+    tracking_id: str | None = Query(None),
+    zone_name: str | None = Query(None),
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+):
+    """
+    Retrieve movement security events with flexible filters:
+    - camera, date (YYYY-MM-DD), event_type, identity_status, severity, employee_name, zone_name.
+    """
+    q = db.query(models.MovementEvent)
+
+    if camera_id is not None:
+        q = q.filter(models.MovementEvent.camera_id == camera_id)
+
+    if date_str:
+        try:
+            target_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+            q = q.filter(func.date(models.MovementEvent.event_timestamp) == target_date)
+        except ValueError:
+            raise HTTPException(400, "Invalid date format. Expected YYYY-MM-DD.")
+
+    if event_type:
+        q = q.filter(models.MovementEvent.event_type == event_type)
+
+    if identity_status:
+        q = q.filter(models.MovementEvent.identity_status == identity_status)
+
+    if severity:
+        q = q.filter(models.MovementEvent.severity == severity.upper())
+
+    if employee_name:
+        q = q.filter(models.MovementEvent.employee_name.ilike(f"%{employee_name}%"))
+
+    if tracking_id:
+        q = q.filter(models.MovementEvent.tracking_id == str(tracking_id))
+
+    if zone_name:
+        q = q.filter(models.MovementEvent.zone_name.ilike(f"%{zone_name}%"))
+
+    total_count = q.count()
+    events = q.order_by(models.MovementEvent.id.desc()).offset(offset).limit(limit).all()
+
+    return {
+        "total": total_count,
+        "offset": offset,
+        "limit": limit,
+        "events": [
+            {
+                "id": e.id,
+                "camera_id": e.camera_id,
+                "tracking_id": e.tracking_id,
+                "employee_id": e.employee_id,
+                "employee_name": e.employee_name,
+                "identity_status": e.identity_status,
+                "event_type": e.event_type,
+                "zone_name": e.zone_name,
+                "severity": e.severity,
+                "confidence": e.confidence,
+                "snapshot_path": e.snapshot_path,
+                "description": e.description,
+                "event_timestamp": e.event_timestamp.isoformat() if e.event_timestamp else None,
+                "created_at": e.created_at.isoformat() if e.created_at else None,
+            }
+            for e in events
+        ],
+    }
+
+
+@app.get("/api/movement/summary")
+def get_movement_summary(db: Session = Depends(get_db)):
+    """
+    Returns real-time movement monitoring statistics:
+    - Current detected people count (broken down into Authorised, Unknown, Unauthorised)
+    - Total violations recorded today
+    - Active restricted zones count
+    """
+    engine = getattr(camera_manager, "movement_security", None)
+    counts = (
+        engine.get_summary_counts(camera_manager.people)
+        if engine
+        else {"total_detected": 0, "authorised_count": 0, "unknown_count": 0, "unauthorised_count": 0}
+    )
+
+    today = date.today()
+    today_violations = db.query(func.count(models.MovementEvent.id)).filter(
+        func.date(models.MovementEvent.event_timestamp) == today
+    ).scalar() or 0
+
+    active_zones = len(engine.zones) if engine else 0
+
+    return {
+        "total_detected": counts["total_detected"],
+        "authorised_count": counts["authorised_count"],
+        "unknown_count": counts["unknown_count"],
+        "unauthorised_count": counts["unauthorised_count"],
+        "today_violations": today_violations,
+        "restricted_zones_active": active_zones,
+        "is_working_hours": engine.is_working_hours() if engine else True,
+        "last_updated": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@app.get("/api/movement/zones")
+def get_movement_zones():
+    """Returns the list of configured movement security zones and operational parameters."""
+    engine = getattr(camera_manager, "movement_security", None)
+    if not engine:
+        return {"zones": [], "working_hours": {}, "enabled": False}
+
+    zones_out = []
+    for z in engine.zones:
+        zones_out.append({
+            "zone_id": z["zone_id"],
+            "zone_name": z["zone_name"],
+            "zone_type": z["zone_type"],
+            "polygon": z["polygon"].tolist() if hasattr(z["polygon"], "tolist") else list(z["polygon"]),
+            "allowed_roles": list(z["allowed_roles"]),
+            "allowed_employees": list(z["allowed_employees"]),
+            "after_hours_restricted": z["after_hours_restricted"],
+            "severity": z["severity"],
+            "color": z["color"],
+        })
+
+    return {
+        "enabled": engine.enabled,
+        "working_hours": engine.working_hours,
+        "alert_cooldown_seconds": engine.alert_cooldown,
+        "zones": zones_out,
+    }
+
+
+@app.post("/api/movement/events", dependencies=[Depends(admin)])
+def create_movement_event_manual(
+    payload: MovementEventCreate,
+    db: Session = Depends(get_db),
+):
+    """Admin endpoint to record or test a movement security event."""
+    ts = payload.event_timestamp or datetime.now(timezone.utc)
+    ev = models.MovementEvent(
+        camera_id=payload.camera_id,
+        tracking_id=payload.tracking_id,
+        employee_id=payload.employee_id,
+        employee_name=payload.employee_name,
+        identity_status=payload.identity_status,
+        event_type=payload.event_type,
+        zone_name=payload.zone_name,
+        severity=payload.severity,
+        confidence=payload.confidence,
+        snapshot_path=payload.snapshot_path,
+        description=payload.description,
+        event_timestamp=ts,
+    )
+    db.add(ev)
+    db.commit()
+    db.refresh(ev)
+    return {"status": "success", "event_id": ev.id}
+

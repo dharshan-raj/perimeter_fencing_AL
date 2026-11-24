@@ -24,6 +24,7 @@ import StatCard from './components/StatCard';
 import CameraFeed from './components/CameraFeed';
 import CameraStatus from './components/CameraStatus';
 import AlertPanel from './components/AlertPanel';
+import MovementSecurityPage from './components/MovementSecurityPage';
 import {
   DailyActivity,
   EventBreakdown,
@@ -39,6 +40,10 @@ const pageTitles = {
   monitoring: [
     'Live monitoring',
     'Camera 14 live stream and perimeter activity.',
+  ],
+  movement: [
+    'Unauthorised Movement Monitoring',
+    'Real-time factory movement, controlled area authorization, and intruder alerts.',
   ],
   headcount: [
     'Gate 3 Headcount',
@@ -1167,6 +1172,13 @@ export default function App() {
                 />
               </div>
             </>
+          )}
+
+
+          {/* UNAUTHORISED MOVEMENT MONITORING */}
+
+          {page === 'movement' && (
+            <MovementSecurityPage cameraProps={cameraProps} token={token} />
           )}
 
 

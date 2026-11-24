@@ -48,6 +48,11 @@ class Camera(Base):
         back_populates="camera"
     )
 
+    # NEW: Movement security events associated with this camera
+    movement_events: Mapped[list["MovementEvent"]] = relationship(
+        back_populates="camera"
+    )
+
 
 # =========================================================
 # ALERT MODEL - EXISTING PERIMETER SECURITY
@@ -237,4 +242,53 @@ class HeadcountEvent(Base):
     camera: Mapped["Camera"] = relationship(
         back_populates="headcount_events"
     )
+
+
+# =========================================================
+# NEW: UNAUTHORISED MOVEMENT EVENT MODEL
+# =========================================================
+
+class MovementEvent(Base):
+    """
+    Stores human movement security events:
+    - Unknown person detection in controlled zones
+    - Restricted area entry
+    - Unauthorized role/employee movement
+    - After-hours factory movement
+    """
+    __tablename__ = "movement_events"
+
+    __table_args__ = (
+        Index("ix_movement_camera_timestamp", "camera_id", "event_timestamp"),
+        Index("ix_movement_zone_timestamp", "zone_name", "event_timestamp"),
+        Index("ix_movement_type_timestamp", "event_type", "event_timestamp"),
+        Index("ix_movement_employee_timestamp", "employee_name", "event_timestamp"),
+        Index("ix_movement_identity_timestamp", "identity_status", "event_timestamp"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+
+    camera_id: Mapped[int] = mapped_column(ForeignKey("cameras.id"), index=True)
+    tracking_id: Mapped[str] = mapped_column(String(80), index=True)
+    employee_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    employee_name: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
+
+    # AUTHORISED / UNKNOWN / UNAUTHORISED
+    identity_status: Mapped[str] = mapped_column(String(30), index=True)
+
+    # UNAUTHORISED_MOVEMENT / RESTRICTED_ZONE_ENTRY / AFTER_HOURS_MOVEMENT / UNKNOWN_PERSON_DETECTION
+    event_type: Mapped[str] = mapped_column(String(80), index=True)
+
+    zone_name: Mapped[str] = mapped_column(String(100), index=True)
+    severity: Mapped[str] = mapped_column(String(20), index=True)  # LOW / MEDIUM / HIGH / CRITICAL
+
+    confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    snapshot_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    event_timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+    camera: Mapped["Camera"] = relationship(back_populates="movement_events")
+
 

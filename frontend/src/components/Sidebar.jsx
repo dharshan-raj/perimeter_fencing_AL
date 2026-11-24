@@ -1,8 +1,10 @@
-import { Activity, BellRing, Camera, ChartNoAxesCombined, Images, MapPinned, Settings2, ShieldCheck } from 'lucide-react';
+import { Activity, BellRing, Camera, ChartNoAxesCombined, Images, MapPinned, Settings2, ShieldCheck, ShieldAlert, Users } from 'lucide-react';
 
 const items = [
   { id: 'dashboard', label: 'Dashboard', icon: Activity },
   { id: 'monitoring', label: 'Live monitoring', icon: Camera },
+  { id: 'movement', label: 'Movement Security', icon: ShieldAlert },
+  { id: 'headcount', label: 'Gate 3 Headcount', icon: Users },
   { id: 'zones', label: 'Restricted zones', icon: MapPinned },
   { id: 'alerts', label: 'Security alerts', icon: BellRing },
   { id: 'analytics', label: 'Analytics', icon: ChartNoAxesCombined },
