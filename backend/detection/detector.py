@@ -1,5 +1,11 @@
+import os
 from pathlib import Path
 import logging
+
+# Ensure Ultralytics writes settings to workspace config directory to avoid AppData permissions
+if "YOLO_CONFIG_DIR" not in os.environ:
+    os.environ["YOLO_CONFIG_DIR"] = str(Path(__file__).resolve().parent.parent.parent / "config")
+
 from ultralytics import YOLO
 from ..config import settings
 log=logging.getLogger(__name__)

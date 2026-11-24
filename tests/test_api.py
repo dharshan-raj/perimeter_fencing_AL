@@ -4,6 +4,8 @@ from backend.config import settings
 
 def test_health(monkeypatch):
     monkeypatch.setattr(settings, "camera_auto_start", False)
+    monkeypatch.setattr(camera_manager, "start", lambda: None)
+    monkeypatch.setattr(camera_manager, "stop", lambda: None)
     with TestClient(app) as client:
         response=client.get("/api/health")
         assert response.status_code==200
@@ -11,6 +13,8 @@ def test_health(monkeypatch):
 
 def test_camera_connection_does_not_claim_unconfigured_rtsp_is_online(monkeypatch):
     monkeypatch.setattr(settings, "camera_auto_start", False)
+    monkeypatch.setattr(camera_manager, "start", lambda: None)
+    monkeypatch.setattr(camera_manager, "stop", lambda: None)
     monkeypatch.setattr(settings, "video_source", "rtsp")
     monkeypatch.setattr(settings, "rtsp_url", "")
     monkeypatch.setattr(settings, "rtsp_ip", "")

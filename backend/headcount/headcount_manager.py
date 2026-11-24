@@ -165,7 +165,7 @@ class HeadcountManager:
 
     def _init_counters(self):
         """Initialize line counters for single or dual line operation."""
-        # Single line counter
+        # Single line counter with strict entry first enforcement
         self.line_counter = LineCounter(
             line_start=self.line_start,
             line_end=self.line_end,
@@ -173,6 +173,7 @@ class HeadcountManager:
             confirmation_frames=self.confirmation_frames,
             cooldown=self.cooldown,
             line_margin=self.line_margin,
+            enforce_entry_first=True,
         )
 
         if self.two_lines and self.line_in_start and self.line_out_start:
@@ -184,6 +185,7 @@ class HeadcountManager:
                 confirmation_frames=self.confirmation_frames,
                 cooldown=self.cooldown,
                 line_margin=self.line_margin,
+                enforce_entry_first=False,
             )
             # Dedicated OUT counter
             self.line_out_counter = LineCounter(
@@ -193,6 +195,7 @@ class HeadcountManager:
                 confirmation_frames=self.confirmation_frames,
                 cooldown=self.cooldown,
                 line_margin=self.line_margin,
+                enforce_entry_first=False,
             )
 
     # -----------------------------------------------------
@@ -218,6 +221,12 @@ class HeadcountManager:
 
         # Convert detections
         processed_people = self.detector.process(people, frame_shape)
+        # Map employee names by id if provided in raw people
+        name_by_id = {
+            str(p.get("id")): p.get("name")
+            for p in people
+            if p.get("id") is not None and p.get("name") and p.get("name") != "Unknown"
+        }
         events = []
 
         if self.two_lines and hasattr(self, "line_in_counter") and hasattr(self, "line_out_counter"):
@@ -238,19 +247,36 @@ class HeadcountManager:
                 if direction not in ("IN", "OUT"):
                     continue
                 tid = str(evt["tracking_id"])
+                emp_name = name_by_id.get(tid)
                 ts = evt.get("timestamp") or time.time()
                 prev = self._last_gate_event.get(tid)
                 if prev:
                     window = same_dir_window if prev[0] == direction else opp_dir_window
                     if (ts - prev[1]) < window:
                         continue
-                self._last_gate_event[tid] = (direction, ts)
-                if direction == "IN":
-                    self.total_in += 1
-                else:
+
+                # Strict entry-first and only entered person can exit
+                if direction == "OUT":
+                    # Check if either this employee or tracking_id is recorded as inside
+                    is_inside = (
+                        (emp_name and emp_name in self._inside_employees)
+                        or (tid in self.line_in_counter.inside_tracking_ids)
+                        or (self.total_in > self.total_out)
+                    )
+                    if not is_inside:
+                        continue
+                    if emp_name:
+                        self._inside_employees.discard(emp_name)
                     self.total_out += 1
+                elif direction == "IN":
+                    if emp_name:
+                        self._inside_employees.add(emp_name)
+                    self.total_in += 1
+
+                self._last_gate_event[tid] = (direction, ts)
                 evt["gate_name"] = self.gate_name
                 evt["direction"] = direction
+                evt["employee_name"] = emp_name
                 evt["event_key"] = f"{self.gate_name}_{tid}_{direction}_{int(ts)}"
                 evt["event_timestamp"] = datetime.fromtimestamp(ts, tz=timezone.utc)
                 events.append(evt)
@@ -259,13 +285,22 @@ class HeadcountManager:
             crossing_events = self.line_counter.process(processed_people)
             for evt in crossing_events:
                 direction = evt.get("direction")
+                tid = str(evt["tracking_id"])
+                emp_name = name_by_id.get(tid)
+                ts = evt.get("timestamp") or time.time()
+
                 if direction == "IN":
+                    if emp_name:
+                        self._inside_employees.add(emp_name)
                     self.total_in += 1
                 elif direction == "OUT":
+                    if emp_name:
+                        self._inside_employees.discard(emp_name)
                     self.total_out += 1
+
                 evt["gate_name"] = self.gate_name
-                ts = evt.get("timestamp") or time.time()
-                evt["event_key"] = f"{self.gate_name}_{evt['tracking_id']}_{evt['direction']}_{int(ts)}"
+                evt["employee_name"] = emp_name
+                evt["event_key"] = f"{self.gate_name}_{tid}_{direction}_{int(ts)}"
                 evt["event_timestamp"] = datetime.fromtimestamp(ts, tz=timezone.utc)
                 events.append(evt)
 
@@ -451,11 +486,11 @@ class HeadcountManager:
         return events
 
     # -----------------------------------------------------
-    # ANNOTATE VIDEO FRAME (DRAW TWO MARKED LINES)
+    # ANNOTATE VIDEO FRAME (DRAW COUNTING LINES & BADGE)
     # -----------------------------------------------------
 
     def _draw_top_counter_bar(self, frame, camera_label=None):
-        """Draws ONLY the top IN / OUT counter badge without any floor lines."""
+        """Draws top IN / OUT / INSIDE counter bar and the virtual detection lines on the frame."""
         if not self.enabled or frame is None:
             return frame
         try:
@@ -471,20 +506,51 @@ class HeadcountManager:
             cv2.rectangle(frame, (bx - 6, by - th - 8), (bx + tw + 6, by + 8), (15, 23, 42), -1)
             cv2.rectangle(frame, (bx - 6, by - th - 8), (bx + tw + 6, by + 8), (54, 210, 185), 2, cv2.LINE_AA)
             cv2.putText(frame, text, (bx, by), font, scale, (255, 255, 255), thickness, cv2.LINE_AA)
+
+            # Draw virtual crossing line on the video frame
+            if not self.two_lines and self.line_start and self.line_end:
+                # Single virtual line for both Entry and Exit
+                p1 = (int(self.line_start[0]), int(self.line_start[1]))
+                p2 = (int(self.line_end[0]), int(self.line_end[1]))
+                cv2.line(frame, p1, p2, (54, 210, 185), 3, cv2.LINE_AA)
+                cv2.putText(frame, "ENTRY / EXIT LINE", (p1[0], max(25, p1[1] - 10)),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (54, 210, 185), 2, cv2.LINE_AA)
+            elif self.two_lines and self.line_in_start and self.line_in_end and self.line_out_start and self.line_out_end:
+                # Green Line for IN
+                p1_in = (int(self.line_in_start[0]), int(self.line_in_start[1]))
+                p2_in = (int(self.line_in_end[0]), int(self.line_in_end[1]))
+                cv2.line(frame, p1_in, p2_in, (34, 197, 94), 3, cv2.LINE_AA)
+                cv2.putText(frame, "ENTRY LINE (IN)", (p1_in[0], max(20, p1_in[1] - 8)),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (34, 197, 94), 2, cv2.LINE_AA)
+
+                # Red / Amber Line for OUT
+                p1_out = (int(self.line_out_start[0]), int(self.line_out_start[1]))
+                p2_out = (int(self.line_out_end[0]), int(self.line_out_end[1]))
+                cv2.line(frame, p1_out, p2_out, (239, 68, 68), 3, cv2.LINE_AA)
+                cv2.putText(frame, "EXIT LINE (OUT)", (p1_out[0], min(frame.shape[0] - 10, p1_out[1] + 20)),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (239, 68, 68), 2, cv2.LINE_AA)
+            elif self.line_start and self.line_end:
+                # Single virtual line fallback
+                p1 = (int(self.line_start[0]), int(self.line_start[1]))
+                p2 = (int(self.line_end[0]), int(self.line_end[1]))
+                cv2.line(frame, p1, p2, (54, 210, 185), 3, cv2.LINE_AA)
+                cv2.putText(frame, "ENTRY / EXIT LINE", (p1[0], max(25, p1[1] - 10)),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (54, 210, 185), 2, cv2.LINE_AA)
+
         except Exception as exc:
-            log.debug("Top counter annotation error: %s", exc)
+            log.debug("Headcount annotation error: %s", exc)
         return frame
 
     def annotate(self, frame):
-        """Draws the top IN / OUT summary badge on the video frame (no floor lines)."""
+        """Draws the top IN / OUT summary badge and lines on the video frame."""
         return self._draw_top_counter_bar(frame)
 
     def annotate_in(self, frame):
-        """Draws the top IN / OUT summary badge on Channel 1 (IN Camera)."""
+        """Draws the top IN / OUT summary badge and lines on Channel 1 (IN Camera)."""
         return self._draw_top_counter_bar(frame, "CH1 - IN")
 
     def annotate_out(self, frame):
-        """Draws the top IN / OUT summary badge on Channel 2 (OUT Camera)."""
+        """Draws the top IN / OUT summary badge and lines on Channel 2 (OUT Camera)."""
         return self._draw_top_counter_bar(frame, "CH2 - OUT")
 
     # -----------------------------------------------------

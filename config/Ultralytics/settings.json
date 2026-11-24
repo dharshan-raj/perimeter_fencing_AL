@@ -1,0 +1,19 @@
+{
+  "settings_version": "0.0.8",
+  "datasets_dir": "C:\\datasets",
+  "weights_dir": "C:\\Perimeter Fencing\\weights",
+  "runs_dir": "C:\\Perimeter Fencing\\runs",
+  "uuid": "5affdea005734b90a121bbad0bce63f431be114c7c0bd33527590206d933ec52",
+  "sync": true,
+  "api_key": "",
+  "openai_api_key": "",
+  "clearml": true,
+  "comet": true,
+  "dvc": true,
+  "mlflow": true,
+  "raytune": true,
+  "tensorboard": false,
+  "wandb": false,
+  "vscode_msg": true,
+  "openvino_msg": true
+}

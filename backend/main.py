@@ -282,25 +282,41 @@ def stream():
                 else:
                     camera_manager.headcount.annotate(image)
 
+                # Retrieve who is currently inside for live label annotations
+                inside_emps = getattr(camera_manager.headcount, "_inside_employees", set())
+                inside_tids = (
+                    getattr(camera_manager.headcount.line_in_counter, "inside_tracking_ids", set())
+                    if hasattr(camera_manager.headcount, "line_in_counter")
+                    else getattr(camera_manager.headcount.line_counter, "inside_tracking_ids", set())
+                )
+
                 for person in camera_manager.people:
 
                     x1, y1, x2, y2 = person["box"]
+                    p_name = person.get("name")
+                    tid = str(person["id"])
+
+                    # Determine IN / OUT state for display (e.g. "Dharshan - IN" or "ID 3 - OUT")
+                    is_p_inside = (p_name and p_name in inside_emps) or (tid in inside_tids)
+                    status_text = "IN" if is_p_inside else "OUT"
+                    disp_label = f"{p_name or ('ID ' + tid)} - {status_text} ({person['confidence']:.2f})"
+                    box_color = (34, 197, 94) if is_p_inside else (239, 68, 68)
 
                     cv2.rectangle(
                         image,
                         (x1, y1),
                         (x2, y2),
-                        (54, 210, 185),
+                        box_color,
                         2
                     )
 
                     cv2.putText(
                         image,
-                        f"{person.get('name') or ('ID ' + str(person['id']))} {person['confidence']:.2f}",
+                        disp_label,
                         (x1, max(18, y1 - 7)),
                         cv2.FONT_HERSHEY_SIMPLEX,
                         0.55,
-                        (54, 210, 185),
+                        box_color,
                         2
                     )
 

@@ -30,6 +30,7 @@ class LineCounter:
         cooldown=3.0,
         history_size=30,
         line_margin=40,
+        enforce_entry_first=False,
     ):
         self.line_start = tuple(line_start)
         self.line_end = tuple(line_end)
@@ -60,6 +61,11 @@ class LineCounter:
         # Total counts.
         self.total_in = 0
         self.total_out = 0
+
+        # Strict entry-first enforcement
+        # When True, OUT events require prior entry or active inside count
+        self.enforce_entry_first = enforce_entry_first
+        self.inside_tracking_ids = set()
 
     # ---------------------------------------------------------
     # GEOMETRY HELPERS
@@ -313,6 +319,13 @@ class LineCounter:
         if direction is None:
             return None
 
+        # Requirement 1 & 3: Person must enter first and only entered person can exit
+        # If enforce_entry_first is enabled:
+        # - An OUT event is only allowed if this tracking_id previously entered and is inside!
+        if self.enforce_entry_first:
+            if direction == "OUT" and tracking_id not in self.inside_tracking_ids:
+                return None
+
         # Prevent repeated counting during quick detection changes.
         current_time = time.time()
         last_time = self.last_count_time.get(tracking_id, 0)
@@ -322,11 +335,13 @@ class LineCounter:
 
         self.last_count_time[tracking_id] = current_time
 
-        # Update totals.
+        # Update totals and inside set.
         if direction == "IN":
             self.total_in += 1
+            self.inside_tracking_ids.add(tracking_id)
         else:
             self.total_out += 1
+            self.inside_tracking_ids.discard(tracking_id)
 
         return {
             "tracking_id": tracking_id,
@@ -379,6 +394,7 @@ class LineCounter:
 
         self.total_in = 0
         self.total_out = 0
+        self.inside_tracking_ids.clear()
 
     # ---------------------------------------------------------
     # TRACK CLEANUP
