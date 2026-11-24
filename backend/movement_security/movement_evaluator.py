@@ -36,6 +36,7 @@ class MovementSecurityEngine:
         self.working_hours: Dict[str, Any] = {}
         self.alert_cooldown: float = 25.0
         self.min_frames_in_zone: int = 2
+        self.identity_resolution_grace_seconds: float = 3.0
         self.zones: List[Dict[str, Any]] = []
         self.employee_roles: Dict[str, str] = {}
         
@@ -210,6 +211,16 @@ class MovementSecurityEngine:
                 desc = f"Employee {resolved_name} is unauthorized to enter {zname} (Role: {emp_role or 'none'})."
 
             if violation_type:
+                identity_pending = (
+                    person.get("identity_state") == "PENDING"
+                    and not resolved_name
+                )
+                if (
+                    identity_pending
+                    and now_ts - st["first_seen"] < self.identity_resolution_grace_seconds
+                ):
+                    continue
+
                 # Alert cooldown & deduplication per track per zone per violation type
                 alert_key = f"{tid}_{zid}_{violation_type}"
                 last_time = self._last_alert_time.get(alert_key, 0.0)

@@ -52,6 +52,16 @@ logger = logging.getLogger(__name__)
 loop = None
 
 
+def _utc_isoformat(value: datetime | None) -> str | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    else:
+        value = value.astimezone(timezone.utc)
+    return value.isoformat()
+
+
 # =========================================================
 # WEBSOCKET + NOTIFICATION PUBLISHING
 # =========================================================
@@ -1147,8 +1157,8 @@ def get_movement_events(
                 "confidence": e.confidence,
                 "snapshot_path": e.snapshot_path,
                 "description": e.description,
-                "event_timestamp": e.event_timestamp.isoformat() if e.event_timestamp else None,
-                "created_at": e.created_at.isoformat() if e.created_at else None,
+                "event_timestamp": _utc_isoformat(e.event_timestamp),
+                "created_at": _utc_isoformat(e.created_at),
             }
             for e in events
         ],

@@ -1,6 +1,20 @@
 from fastapi.testclient import TestClient
-from backend.main import app, camera_manager
+from datetime import datetime, timedelta, timezone
+
+from backend.main import _utc_isoformat, app, camera_manager
 from backend.config import settings
+
+
+def test_utc_isoformat_marks_naive_database_timestamps_as_utc():
+    stored_utc = datetime(2026, 11, 24, 12, 0, 0)
+    assert _utc_isoformat(stored_utc) == "2026-11-24T12:00:00+00:00"
+
+
+def test_utc_isoformat_normalizes_aware_timestamps():
+    local_offset = timezone(timedelta(hours=5, minutes=30))
+    timestamp = datetime(2026, 11, 24, 17, 30, 0, tzinfo=local_offset)
+    assert _utc_isoformat(timestamp) == "2026-11-24T12:00:00+00:00"
+
 
 def test_health(monkeypatch):
     monkeypatch.setattr(settings, "camera_auto_start", False)

@@ -155,3 +155,53 @@ def test_summary_counts(movement_engine):
     assert summary["authorised_count"] == 2
     assert summary["unknown_count"] == 1
     assert summary["unauthorised_count"] == 1
+
+
+def test_pending_face_identity_resolves_before_movement_alert(movement_engine):
+    person = {
+        "id": 5,
+        "box": [180, 100, 220, 200],
+        "name": None,
+        "identity_state": "PENDING",
+        "confidence": 0.9,
+    }
+    t0 = datetime(2026, 11, 24, 12, 0, 0, tzinfo=timezone.utc)
+
+    assert movement_engine.evaluate_person(
+        person, 1, "Camera 14", t0.timestamp(), t0
+    ) == []
+
+    person.update(name="Divya", identity_state="IDENTIFIED")
+    t1 = t0.replace(second=1)
+    events = movement_engine.evaluate_person(
+        person, 1, "Camera 14", t1.timestamp(), t1
+    )
+
+    assert len(events) == 1
+    assert events[0]["event_type"] == "UNAUTHORISED_MOVEMENT"
+    assert events[0]["employee_name"] == "Divya"
+    assert events[0]["employee_id"] == "divya"
+
+
+def test_pending_face_identity_falls_back_to_unknown_after_grace(movement_engine):
+    person = {
+        "id": 6,
+        "box": [180, 100, 220, 200],
+        "name": None,
+        "identity_state": "PENDING",
+        "confidence": 0.9,
+    }
+    t0 = datetime(2026, 11, 24, 12, 0, 0, tzinfo=timezone.utc)
+
+    assert movement_engine.evaluate_person(
+        person, 1, "Camera 14", t0.timestamp(), t0
+    ) == []
+
+    t1 = t0.replace(second=3)
+    events = movement_engine.evaluate_person(
+        person, 1, "Camera 14", t1.timestamp(), t1
+    )
+
+    assert len(events) == 1
+    assert events[0]["event_type"] == "UNKNOWN_PERSON_DETECTION"
+    assert events[0]["identity_status"] == "UNKNOWN"

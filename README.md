@@ -7,6 +7,7 @@ A modular Camera 14 monitoring application. FastAPI runs an isolated camera work
 - Python 3.10+ and FFmpeg available to OpenCV
 - Node.js 18+ / npm
 - Network reachability from the backend computer to the CCTV/NVR RTSP stream
+- On Windows, Microsoft C++ Build Tools (MSVC 14+) are needed to build InsightFace.
 
 ## Run locally
 

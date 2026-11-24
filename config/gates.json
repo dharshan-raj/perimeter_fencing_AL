@@ -6,17 +6,17 @@
             "enabled": true,
             "camera_name": "Perimeter Camera",
             "two_lines": false,
-            "line": {
-                "start": [
-                    550,
-                    420
-                ],
-                "end": [
-                    880,
-                    460
-                ],
-                "entry_direction": "A_TO_B"
-            },
+"line": {
+    "start": [
+        830,
+        570
+    ],
+    "end": [
+        1020,
+        620
+    ],
+    "entry_direction": "A_TO_B"
+},
             "detection": {
                 "confidence_threshold": 0.35,
                 "confirmation_frames": 2,
