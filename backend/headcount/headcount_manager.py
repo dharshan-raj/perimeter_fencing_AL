@@ -171,7 +171,15 @@ class HeadcountManager:
 
     def _init_counters(self):
         """Initialize line counters for single or dual line operation."""
-        # Single line counter
+        # Defensive guard: line start and end must not be identical
+        if self.line_start == self.line_end:
+            self.line_end = (self.line_start[0] + 300, self.line_start[1])
+        if self.line_in_start and self.line_in_start == self.line_in_end:
+            self.line_in_end = (self.line_in_start[0] + 300, self.line_in_start[1])
+        if self.line_out_start and self.line_out_start == self.line_out_end:
+            self.line_out_end = (self.line_out_start[0] + 300, self.line_out_start[1])
+
+        # Single line counter with strict entry first enforcement
         self.line_counter = LineCounter(
             line_start=self.line_start,
             line_end=self.line_end,
@@ -289,7 +297,7 @@ class HeadcountManager:
         else:
             # Fallback single line counter
             line_people = [
-                {**p, "footpoint": p.get("lower_point") or p.get("footpoint")}
+                {**p, "footpoint": p.get("footpoint") or p.get("lower_point")}
                 for p in processed_people
             ]
             crossing_events = self.line_counter.process(line_people)

@@ -38,9 +38,9 @@ class Settings(BaseSettings):
     face_max_photos: int = 15
     face_match_threshold: float = 0.40
     face_match_margin: float = 0.05
-    face_votes_required: int = 2
-    face_min_person_height: int = 150
-    face_min_face_px: int = 32
+    face_votes_required: int = 1
+    face_min_person_height: int = 80
+    face_min_face_px: int = 28
     face_min_det_score: float = 0.5
     face_min_blur: float = 15.0
     face_unknown_attempts: int = 5

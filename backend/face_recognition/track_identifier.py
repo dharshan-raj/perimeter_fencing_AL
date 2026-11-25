@@ -100,8 +100,8 @@ class TrackIdentifier:
                 continue
             candidates.append((person["box"][3] - person["box"][1], tid, person))
 
-        # Prioritize people in the Gate 3 corridor (cx >= 550), then closest (tallest) first.
-        candidates.sort(key=lambda c: (0 if (c[2]["box"][0] + c[2]["box"][2]) // 2 >= 550 else 1, -c[0]))
+        # Prioritize closest (tallest) first.
+        candidates.sort(key=lambda c: -c[0])
         for _, tid, person in candidates[: self.max_per_cycle]:
             try:
                 self._observe(self._tracks[tid], person, frame, now)
@@ -149,7 +149,7 @@ class TrackIdentifier:
 
             if not candidates or self._worker_busy:
                 return people
-            candidates.sort(key=lambda c: (0 if (c[2]["box"][0] + c[2]["box"][2]) // 2 >= 550 else 1, -c[0]))
+            candidates.sort(key=lambda c: -c[0])
             selected = candidates[: self.max_per_cycle]
             self._worker_busy = True
 

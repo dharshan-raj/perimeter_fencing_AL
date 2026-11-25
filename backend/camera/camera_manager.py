@@ -297,6 +297,10 @@ class CameraManager:
                             if _p.get("identity_state") == "IDENTIFIED":
                                 # Keeps the Gate 3 attendance fallback lookup working.
                                 self._face_cache[_p["id"]] = (_p["name"], _now)
+                            elif not _p.get("name") and _p["id"] in self._face_cache:
+                                _c_name, _ = self._face_cache[_p["id"]]
+                                if _c_name and _c_name != "Unknown":
+                                    _p["name"] = _c_name
                         _v2_done = True
                     except Exception:
                         log.exception("Face recognition v2 failed; falling back to v1")

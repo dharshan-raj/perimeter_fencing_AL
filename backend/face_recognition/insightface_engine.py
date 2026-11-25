@@ -1,6 +1,7 @@
 
 import cv2
 import numpy as np
+from pathlib import Path
 from insightface.app import FaceAnalysis
 
 
@@ -8,15 +9,25 @@ class InsightFaceEngine:
     def __init__(
         self,
         model_name="buffalo_l",
-        match_threshold=0.45
+        match_threshold=0.45,
+        root=None
     ):
         self.match_threshold = match_threshold
 
+        if root is None:
+            local_models = Path(__file__).resolve().parent.parent.parent / "models" / ".insightface"
+            if local_models.exists():
+                root = str(local_models)
+
+        kwargs = {
+            "name": model_name,
+            "providers": ["CPUExecutionProvider"]
+        }
+        if root:
+            kwargs["root"] = str(root)
+
         # CPU mode. We can configure GPU later.
-        self.app = FaceAnalysis(
-            name=model_name,
-            providers=["CPUExecutionProvider"]
-        )
+        self.app = FaceAnalysis(**kwargs)
 
         self.app.prepare(
             ctx_id=-1,

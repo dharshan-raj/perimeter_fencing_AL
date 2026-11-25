@@ -306,10 +306,17 @@ def stream():
                     p_name = person.get("name")
                     tid = str(person["id"])
 
+                    # Fallback to face cache if person name is not set on current frame
+                    if (not p_name or p_name == "Unknown") and hasattr(camera_manager, "_face_cache"):
+                        cached_entry = camera_manager._face_cache.get(person["id"])
+                        if cached_entry and cached_entry[0] and cached_entry[0] != "Unknown":
+                            p_name = cached_entry[0]
+
                     # Determine IN / OUT state for display (e.g. "Dharshan - IN" or "ID 3 - OUT")
                     is_p_inside = (p_name and p_name in inside_emps) or (tid in inside_tids)
                     status_text = "IN" if is_p_inside else "OUT"
-                    disp_label = f"{p_name or ('ID ' + tid)} - {status_text} ({person['confidence']:.2f})"
+                    disp_name = p_name.capitalize() if (p_name and p_name != "Unknown") else f"ID {tid}"
+                    disp_label = f"{disp_name} - {status_text} ({person['confidence']:.2f})"
                     box_color = (34, 197, 94) if is_p_inside else (239, 68, 68)
 
                     cv2.rectangle(

@@ -17,4 +17,20 @@ class ZoneManager:
     def inside(self, point, shape): return cv2.pointPolygonTest(self.polygon(shape), tuple(map(float,point)), False)>=0
     def distance(self, point, shape):
         poly=self.polygon(shape); return min(abs(cv2.pointPolygonTest(poly,tuple(map(float,point)),True)), 100000)
-    def annotate(self, frame): cv2.polylines(frame,[self.polygon(frame.shape)],True,(0,200,255),2); return frame
+    def annotate(self, frame, is_intrusion=False):
+        poly = self.polygon(frame.shape)
+        overlay = frame.copy()
+        fill_color = (0, 0, 180) if is_intrusion else (0, 140, 255)
+        border_color = (0, 0, 255) if is_intrusion else (0, 200, 255)
+        cv2.fillPoly(overlay, [poly], fill_color)
+        cv2.addWeighted(overlay, 0.15, frame, 0.85, 0, frame)
+        cv2.polylines(frame, [poly], True, border_color, 2, cv2.LINE_AA)
+        top_idx = int(np.argmin(poly[:, 1]))
+        tx, ty = int(poly[top_idx][0]), max(22, int(poly[top_idx][1]) - 8)
+        name = self.zone.get("name", "Restricted Area")
+        text = f"PERIMETER: {name}" + (" [INTRUSION!]" if is_intrusion else "")
+        (tw, th), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+        cv2.rectangle(frame, (tx - 4, ty - th - 5), (tx + tw + 4, ty + 3), (15, 23, 42), -1)
+        cv2.rectangle(frame, (tx - 4, ty - th - 5), (tx + tw + 4, ty + 3), border_color, 1)
+        cv2.putText(frame, text, (tx, ty), cv2.FONT_HERSHEY_SIMPLEX, 0.5, border_color, 1, cv2.LINE_AA)
+        return frame

@@ -8,12 +8,12 @@
             "two_lines": false,
             "line": {
                 "start": [
-                    150,
-                    560
+                    350,
+                    550
                 ],
                 "end": [
-                    1050,
-                    560
+                    590,
+                    500
                 ],
                 "entry_direction": "A_TO_B"
             },
