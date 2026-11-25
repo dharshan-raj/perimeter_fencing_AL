@@ -6,22 +6,23 @@
             "enabled": true,
             "camera_name": "Perimeter Camera",
             "two_lines": false,
-"line": {
-    "start": [
-        830,
-        570
-    ],
-    "end": [
-        1020,
-        620
-    ],
-    "entry_direction": "A_TO_B"
-},
+            "line": {
+                "start": [
+                    150,
+                    560
+                ],
+                "end": [
+                    1050,
+                    560
+                ],
+                "entry_direction": "A_TO_B"
+            },
             "detection": {
-                "confidence_threshold": 0.35,
-                "confirmation_frames": 2,
-                "cooldown_seconds": 3.0,
-                "line_margin": 50
+                "confidence_threshold": 0.30,
+                "confirmation_frames": 1,
+                "cooldown_seconds": 1.5,
+                "line_margin": 100,
+                "enforce_entry_first": false
             },
             "monitoring": {
                 "count_entry": true,

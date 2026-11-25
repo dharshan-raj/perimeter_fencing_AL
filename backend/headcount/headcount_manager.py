@@ -35,6 +35,7 @@ class HeadcountManager:
         line_in_end=None,
         line_out_start=None,
         line_out_end=None,
+        enforce_entry_first=True,
     ):
         self.gate_name = gate_name
         self.line_start = tuple(line_start)
@@ -44,6 +45,7 @@ class HeadcountManager:
         self.confirmation_frames = confirmation_frames
         self.cooldown = cooldown
         self.line_margin = line_margin
+        self.enforce_entry_first = enforce_entry_first
 
         self.two_lines = two_lines
         self.line_in_start = tuple(line_in_start) if line_in_start else None
@@ -156,6 +158,10 @@ class HeadcountManager:
             self.confirmation_frames = det_data.get("confirmation_frames", self.confirmation_frames)
             self.cooldown = det_data.get("cooldown_seconds", self.cooldown)
             self.line_margin = det_data.get("line_margin", self.line_margin)
+            self.enforce_entry_first = det_data.get("enforce_entry_first", False)
+
+            if hasattr(self, "detector") and self.detector is not None:
+                self.detector.confidence_threshold = self.confidence_threshold
 
             if hasattr(self, "line_counter"):
                 self._init_counters()
@@ -165,7 +171,7 @@ class HeadcountManager:
 
     def _init_counters(self):
         """Initialize line counters for single or dual line operation."""
-        # Single line counter with strict entry first enforcement
+        # Single line counter
         self.line_counter = LineCounter(
             line_start=self.line_start,
             line_end=self.line_end,
@@ -173,7 +179,7 @@ class HeadcountManager:
             confirmation_frames=self.confirmation_frames,
             cooldown=self.cooldown,
             line_margin=self.line_margin,
-            enforce_entry_first=True,
+            enforce_entry_first=getattr(self, "enforce_entry_first", False),
         )
 
         if self.two_lines and self.line_in_start and self.line_out_start:
@@ -282,12 +288,26 @@ class HeadcountManager:
                 events.append(evt)
         else:
             # Fallback single line counter
-            crossing_events = self.line_counter.process(processed_people)
+            line_people = [
+                {**p, "footpoint": p.get("lower_point") or p.get("footpoint")}
+                for p in processed_people
+            ]
+            crossing_events = self.line_counter.process(line_people)
             for evt in crossing_events:
                 direction = evt.get("direction")
                 tid = str(evt["tracking_id"])
                 emp_name = name_by_id.get(tid)
                 ts = evt.get("timestamp") or time.time()
+
+                # Strict entry-first and only entered person can exit (if enabled)
+                if direction == "OUT" and getattr(self, "enforce_entry_first", False):
+                    is_inside = (
+                        (emp_name and emp_name in self._inside_employees)
+                        or (tid in getattr(self.line_counter, "inside_tracking_ids", set()))
+                        or (self.total_in > self.total_out)
+                    )
+                    if not is_inside:
+                        continue
 
                 if direction == "IN":
                     if emp_name:
@@ -299,6 +319,7 @@ class HeadcountManager:
                     self.total_out += 1
 
                 evt["gate_name"] = self.gate_name
+                evt["direction"] = direction
                 evt["employee_name"] = emp_name
                 evt["event_key"] = f"{self.gate_name}_{tid}_{direction}_{int(ts)}"
                 evt["event_timestamp"] = datetime.fromtimestamp(ts, tz=timezone.utc)
@@ -559,20 +580,11 @@ class HeadcountManager:
 
     def get_counts(self):
         """Get current entry, exit and inside counts."""
-        if self.two_lines and hasattr(self, "line_in_counter") and hasattr(self, "line_out_counter"):
-            return {
-                "gate_name": self.gate_name,
-                "total_in": self.total_in,
-                "total_out": self.total_out,
-                "current_inside": max(0, self.total_in - self.total_out),
-            }
-
-        counts = self.line_counter.get_counts()
         return {
             "gate_name": self.gate_name,
-            "total_in": counts["total_in"],
-            "total_out": counts["total_out"],
-            "current_inside": counts["current_inside"],
+            "total_in": self.total_in,
+            "total_out": self.total_out,
+            "current_inside": max(0, self.total_in - self.total_out),
         }
 
     # -----------------------------------------------------

@@ -30,9 +30,9 @@ class Settings(BaseSettings):
     camera_open_timeout: int = 10000
     sample_fallback_after: float = 15.0
     model_path: str = "models/yolov8n.pt"
-    person_confidence: float = 0.45
+    person_confidence: float = 0.30
     iou_threshold: float = 0.45
-    inference_fps: float = 8
+    inference_fps: float = 3.0
     # --- Face recognition v2 (multi-frame identification of tracked people) ---
     face_v2_enabled: bool = True
     face_max_photos: int = 15
