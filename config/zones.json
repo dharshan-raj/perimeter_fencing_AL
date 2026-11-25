@@ -1,6 +1,9 @@
 {
   "name": "Restricted Area",
   "mode": "approach",
+  "allowed_employees": [
+    "dharshan"
+  ],
   "points": [
     [
       0.16663763976601484,

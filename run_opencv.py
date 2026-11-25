@@ -150,11 +150,24 @@ def main():
                 if not pt:
                     bx = p["box"]
                     pt = ((bx[0] + bx[2]) / 2, bx[3])
-                if camera_manager.zone.inside(pt, display_frame.shape):
+                p_in_zone = camera_manager.zone.inside(pt, display_frame.shape)
+                p["in_perimeter"] = p_in_zone
+
+                # Retrieve recognized name
+                p_name = p.get("name")
+                if (not p_name or p_name == "Unknown") and hasattr(camera_manager, "_face_cache"):
+                    c_entry = camera_manager._face_cache.get(p["id"])
+                    if c_entry and c_entry[0] and c_entry[0] != "Unknown":
+                        p_name = c_entry[0]
+                        p["name"] = p_name
+
+                # Check if this person has authorized perimeter access (e.g. Dharshan)
+                is_p_authorised = camera_manager.zone.is_authorised(p_name)
+                p["is_perimeter_authorised"] = is_p_authorised
+
+                # An intrusion alert only occurs if someone unauthorized enters
+                if p_in_zone and not is_p_authorised:
                     is_perimeter_intrusion = True
-                    p["in_perimeter"] = True
-                else:
-                    p["in_perimeter"] = False
 
             # 3. Draw Perimeter Zone on frame (Glowing boundary + semi-transparent fill)
             camera_manager.zone.annotate(display_frame, is_intrusion=is_perimeter_intrusion)
@@ -191,10 +204,16 @@ def main():
                 # Authorised check
                 is_authorised = bool(p_name and p_name != "Unknown")
                 is_in_perimeter = person.get("in_perimeter", False)
+                is_perim_auth = person.get("is_perimeter_authorised", False) or camera_manager.zone.is_authorised(p_name)
 
                 if is_in_perimeter:
-                    auth_label = "PERIMETER INTRUDER"
-                    box_color = (0, 0, 255)  # Bright Red for intrusion
+                    if is_perim_auth:
+                        auth_count += 1
+                        auth_label = "AUTHORISED - PERIMETER"
+                        box_color = (34, 197, 94)  # Vibrant Green
+                    else:
+                        auth_label = "PERIMETER INTRUDER"
+                        box_color = (0, 0, 255)  # Bright Red for intrusion
                 elif is_authorised:
                     auth_count += 1
                     auth_label = "AUTHORISED"
