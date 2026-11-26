@@ -1,6 +1,6 @@
 import pytest
-from backend.headcount.line_counter import LineCounter
-from backend.headcount.headcount_manager import HeadcountManager
+from entry_exit_headcount.line_counter import LineCounter
+from entry_exit_headcount.headcount_manager import HeadcountManager
 
 def test_strict_entry_first_enforcement():
     # Initialize a counter with enforce_entry_first=True

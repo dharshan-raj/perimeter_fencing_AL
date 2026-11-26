@@ -1,6 +1,6 @@
 
 import cv2
-from backend.face_recognition.employee_registry import EmployeeRegistry
+from shared.face_recognition.employee_registry import EmployeeRegistry
 
 registry = EmployeeRegistry("employee_faces")
 

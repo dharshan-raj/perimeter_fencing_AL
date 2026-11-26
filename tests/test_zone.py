@@ -1,5 +1,5 @@
-from backend.detection.zone_manager import ZoneManager
-from backend.detection.intrusion_detector import IntrusionDetector
+from perimeter_fencing.zone_manager import ZoneManager
+from perimeter_fencing.intrusion_detector import IntrusionDetector
 
 def test_crossing_only_raises_on_entry():
     zone=ZoneManager(); zone.zone={"name":"test","mode":"crossing","points":[[.5,.5],[.9,.5],[.9,.9],[.5,.9]]}

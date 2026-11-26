@@ -18,10 +18,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
-from backend.config import settings
-from backend.database import Base, engine, SessionLocal
-from backend import models
-from backend.camera.camera_manager import camera_manager
+from shared.config import settings
+from shared.database import Base, engine, SessionLocal
+from shared import models
+from shared.camera.camera_manager import camera_manager
 
 
 def init_database():

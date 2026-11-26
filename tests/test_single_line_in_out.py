@@ -1,5 +1,5 @@
 import pytest
-from backend.headcount.headcount_manager import HeadcountManager
+from entry_exit_headcount.headcount_manager import HeadcountManager
 
 def test_headcount_manager_single_line():
     manager = HeadcountManager(

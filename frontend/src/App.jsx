@@ -23,19 +23,13 @@ import Sidebar from './components/Sidebar';
 import StatCard from './components/StatCard';
 import CameraFeed from './components/CameraFeed';
 import CameraStatus from './components/CameraStatus';
-import AlertPanel from './components/AlertPanel';
 import MovementSecurityPage from './components/MovementSecurityPage';
-import {
-  DailyActivity,
-  EventBreakdown,
-  HourlyActivity,
-} from './components/AnalyticsPanels';
 
 
 const pageTitles = {
   dashboard: [
     'Operations overview',
-    'Perimeter security activity across the IT Furnace facility.',
+    'Perimeter security and live camera activity across the IT Furnace facility.',
   ],
   monitoring: [
     'Live monitoring',
@@ -52,14 +46,6 @@ const pageTitles = {
   zones: [
     'Restricted zones',
     'Draw and manage the monitored perimeter on the camera view.',
-  ],
-  alerts: [
-    'Security alerts',
-    'Review and export recent camera events.',
-  ],
-  analytics: [
-    'Security analytics',
-    'Review event activity and alert distribution.',
   ],
   evidence: [
     'Incident evidence',
@@ -950,15 +936,7 @@ export default function App() {
   };
 
   const pageAction =
-    page === 'alerts' ? (
-      <button
-        className="button-secondary"
-        onClick={() => downloadCsv(filteredAlerts)}
-      >
-        <ArrowDownToLine size={15} />
-        Export CSV
-      </button>
-    ) : page === 'dashboard' ? (
+    page === 'dashboard' ? (
       <button
         className="button-secondary"
         onClick={() => refresh(true)}
@@ -1091,18 +1069,6 @@ export default function App() {
 
               <div className="dashboard-main-grid">
                 <CameraFeed {...cameraProps} />
-
-                <AlertPanel
-                  alerts={alerts}
-                  limit={7}
-                  compact
-                  onViewAll={() => setPage('alerts')}
-                />
-              </div>
-
-              <div className="analytics-grid">
-                <DailyActivity data={daily.daily} />
-                <EventBreakdown data={daily.event_types} />
               </div>
             </>
           )}
@@ -1213,52 +1179,6 @@ export default function App() {
               </div>
 
               <CameraFeed {...cameraProps} />
-            </div>
-          )}
-
-
-          {/* ALERTS */}
-
-          {page === 'alerts' && (
-            <section className="panel alerts-page-panel">
-              <div className="alert-filterbar">
-                <div>
-                  <span className="section-kicker">EVENT HISTORY</span>
-
-                  <strong>
-                    {filteredAlerts.length}{' '}
-                    {filter === 'All'
-                      ? 'events'
-                      : `${filter.toLowerCase()} events`}
-                  </strong>
-                </div>
-
-                <label className="filter-select-label">
-                  Severity
-
-                  <select
-                    value={filter}
-                    onChange={event => setFilter(event.target.value)}
-                  >
-                    <option>All</option>
-                    <option>CRITICAL</option>
-                    <option>WARNING</option>
-                  </select>
-                </label>
-              </div>
-
-              <AlertPanel alerts={filteredAlerts} />
-            </section>
-          )}
-
-
-          {/* ANALYTICS */}
-
-          {page === 'analytics' && (
-            <div className="analytics-page-grid">
-              <DailyActivity data={daily.daily} />
-              <EventBreakdown data={daily.event_types} />
-              <HourlyActivity data={daily.hourly} />
             </div>
           )}
 

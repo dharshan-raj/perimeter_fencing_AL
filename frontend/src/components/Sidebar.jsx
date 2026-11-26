@@ -1,4 +1,4 @@
-import { Activity, BellRing, Camera, ChartNoAxesCombined, Images, MapPinned, Settings2, ShieldCheck, ShieldAlert, Users } from 'lucide-react';
+import { Activity, Camera, Images, MapPinned, Settings2, ShieldCheck, ShieldAlert, Users } from 'lucide-react';
 
 const items = [
   { id: 'dashboard', label: 'Dashboard', icon: Activity },
@@ -6,13 +6,11 @@ const items = [
   { id: 'movement', label: 'Movement Security', icon: ShieldAlert },
   { id: 'headcount', label: 'Gate 3 Headcount', icon: Users },
   { id: 'zones', label: 'Restricted zones', icon: MapPinned },
-  { id: 'alerts', label: 'Security alerts', icon: BellRing },
-  { id: 'analytics', label: 'Analytics', icon: ChartNoAxesCombined },
   { id: 'evidence', label: 'Evidence', icon: Images },
   { id: 'settings', label: 'Settings', icon: Settings2 },
 ];
 
-export default function Sidebar({ active, onNavigate, alertCount = 0 }) {
+export default function Sidebar({ active, onNavigate }) {
   return <aside className="sidebar">
     <button className="brand" onClick={() => onNavigate('dashboard')} aria-label="IT Furnace Security dashboard">
       <span className="brand-mark"><ShieldCheck size={21} /></span>
@@ -21,7 +19,7 @@ export default function Sidebar({ active, onNavigate, alertCount = 0 }) {
     <div className="sidebar-section-label">OPERATIONS</div>
     <nav className="nav-list" aria-label="Main navigation">
       {items.map(({ id, label, icon: Icon }) => <button key={id} aria-label={label} title={label} className={`nav-item ${active === id ? 'active' : ''}`} onClick={() => onNavigate(id)}>
-        <Icon size={17} /><span>{label}</span>{id === 'alerts' && alertCount > 0 && <span className="nav-count">{alertCount > 99 ? '99+' : alertCount}</span>}
+        <Icon size={17} /><span>{label}</span>
       </button>)}
     </nav>
     <div className="sidebar-spacer" />

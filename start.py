@@ -11,4 +11,4 @@ if __name__ == "__main__":
     if already_running:
         print(f"Backend is already running at http://localhost:{PORT}; reusing the existing server.")
     else:
-        uvicorn.run("backend.main:app", host=HOST, port=PORT, reload=False)
+        uvicorn.run("main:app", host=HOST, port=PORT, reload=False)
