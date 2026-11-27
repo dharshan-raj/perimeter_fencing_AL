@@ -490,17 +490,20 @@ class CameraManager:
                         self.seen_person_ids.add(tracking_id)
                         self.total_people += 1
                     state = intrusion.evaluate(person, frame.shape, settings.alert_cooldown)
+                    person["in_perimeter"] = state["inside"]
+                    person["leg_inside"] = state.get("leg_inside", False)
+                    person["leg_parts_inside"] = state.get("leg_parts_inside", [])
                     db.add(DetectionLog(
                         camera_id=cam_id,
                         tracking_id=str(tracking_id),
                         confidence=person["confidence"],
                         bounding_box=str(person["box"]),
-                        zone_status="Inside" if state["inside"] else "Outside",
+                        zone_status="Leg Intrusion" if state.get("leg_inside") else ("Inside" if state["inside"] else "Outside"),
                     ))
                     if not state["event"]:
                         continue
                     evidence = save(frame, person, self.zone)
-                    critical = state["event"] != "Boundary Approach"
+                    critical = not str(state["event"]).startswith("Boundary Approach")
                     alert = Alert(
                         camera_id=cam_id,
                         person_tracking_id=str(tracking_id),
@@ -519,6 +522,10 @@ class CameraManager:
                         "id": alert.id, "camera_name": settings.camera_name,
                         "nvr_name": settings.nvr_name, "location": settings.camera_location,
                         "person_tracking_id": alert.person_tracking_id,
+                        "employee_name": state.get("employee_name"),
+                        "authorised": state.get("authorised", False),
+                        "leg_inside": state.get("leg_inside", False),
+                        "leg_parts_inside": state.get("leg_parts_inside", []),
                         "event_type": alert.event_type, "severity": alert.severity,
                         "confidence": alert.confidence, "zone_name": alert.zone_name,
                         "crossing_direction": alert.crossing_direction,

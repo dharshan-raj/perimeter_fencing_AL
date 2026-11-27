@@ -22,6 +22,7 @@ from config.settings import settings
 from backend.database.database import Base, engine, SessionLocal
 from backend.database import models
 from backend.camera.camera_manager import camera_manager
+from backend.ai.detector import draw_leg_pose
 
 
 def init_database():
@@ -142,16 +143,26 @@ def main():
 
             display_frame = frame.copy()
 
-            # 2. Check for Perimeter Zone Intrusion
+            # 2. Check for Perimeter Zone Intrusion (Pose Leg Keypoints + Footpoint)
+            # IMPORTANT: Perimeter violation and face authorization are SEPARATE decisions.
+            # Even an authorized employee triggers a Leg Intrusion alert if their leg enters the zone.
             people = camera_manager.people or []
             is_perimeter_intrusion = False
             for p in people:
+                leg_kpts = p.get("leg_keypoints") or {}
+                parts_in_zone = [
+                    part for part, kp in leg_kpts.items()
+                    if kp and len(kp) >= 2 and camera_manager.zone.inside((kp[0], kp[1]), display_frame.shape)
+                ]
                 pt = p.get("point")
                 if not pt:
                     bx = p["box"]
                     pt = ((bx[0] + bx[2]) / 2, bx[3])
-                p_in_zone = camera_manager.zone.inside(pt, display_frame.shape)
-                p["in_perimeter"] = p_in_zone
+                body_in_zone = camera_manager.zone.inside(pt, display_frame.shape)
+                leg_in_zone = len(parts_in_zone) > 0
+                p["leg_inside"] = leg_in_zone
+                p["leg_parts_inside"] = parts_in_zone
+                p["in_perimeter"] = leg_in_zone or body_in_zone
 
                 # Retrieve recognized name
                 p_name = p.get("name")
@@ -161,12 +172,7 @@ def main():
                         p_name = c_entry[0]
                         p["name"] = p_name
 
-                # Check if this person has authorized perimeter access (e.g. Dharshan)
-                is_p_authorised = camera_manager.zone.is_authorised(p_name)
-                p["is_perimeter_authorised"] = is_p_authorised
-
-                # An intrusion alert only occurs if someone unauthorized enters
-                if p_in_zone and not is_p_authorised:
+                if p["in_perimeter"]:
                     is_perimeter_intrusion = True
 
             # 3. Draw Perimeter Zone on frame (Glowing boundary + semi-transparent fill)
@@ -186,7 +192,7 @@ def main():
                 else getattr(camera_manager.headcount.line_counter, "inside_tracking_ids", set())
             )
 
-            # 5. Annotate Each Detected Person
+            # 5. Annotate Each Detected Person (Pose Leg Keypoints + Auth + Intrusion)
             auth_count = 0
             unk_count = 0
 
@@ -195,32 +201,38 @@ def main():
                 p_name = person.get("name")
                 tid = str(person["id"])
 
+                # Draw knee/ankle pose skeleton on person
+                draw_leg_pose(display_frame, person, camera_manager.zone)
+
                 # Check cache fallback if not on current frame
                 if (not p_name or p_name == "Unknown") and hasattr(camera_manager, "_face_cache"):
                     cached_entry = camera_manager._face_cache.get(person["id"])
                     if cached_entry and cached_entry[0] and cached_entry[0] != "Unknown":
                         p_name = cached_entry[0]
 
-                # Authorised check
+                # Separate decisions: Authorization (Face) vs Perimeter Intrusion (Pose/Zone)
                 is_authorised = bool(p_name and p_name != "Unknown")
+                is_leg_intrusion = person.get("leg_inside", False)
                 is_in_perimeter = person.get("in_perimeter", False)
-                is_perim_auth = person.get("is_perimeter_authorised", False) or camera_manager.zone.is_authorised(p_name)
 
-                if is_in_perimeter:
-                    if is_perim_auth:
-                        auth_count += 1
-                        auth_label = "AUTHORISED - PERIMETER"
-                        box_color = (34, 197, 94)  # Vibrant Green
-                    else:
-                        auth_label = "PERIMETER INTRUDER"
-                        box_color = (0, 0, 255)  # Bright Red for intrusion
-                elif is_authorised:
+                if is_authorised:
                     auth_count += 1
-                    auth_label = "AUTHORISED"
-                    box_color = (34, 197, 94)  # Vibrant Green
+                    auth_tag = "AUTHORISED"
                 else:
                     unk_count += 1
-                    auth_label = "UNKNOWN"
+                    auth_tag = "UNKNOWN"
+
+                if is_leg_intrusion:
+                    auth_label = f"{auth_tag} | LEG INTRUSION!"
+                    box_color = (0, 0, 255)  # Bright Red
+                elif is_in_perimeter:
+                    auth_label = f"{auth_tag} | ZONE INTRUSION!"
+                    box_color = (0, 0, 255)  # Bright Red
+                elif is_authorised:
+                    auth_label = auth_tag
+                    box_color = (34, 197, 94)  # Vibrant Green
+                else:
+                    auth_label = auth_tag
                     box_color = (0, 215, 255)  # Amber / Yellow
 
                 # Determine IN / OUT state

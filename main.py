@@ -42,6 +42,7 @@ from backend.database.schemas import (
     MovementSummaryResponse,
 )
 from backend.camera.camera_manager import camera_manager
+from backend.ai.detector import draw_leg_pose
 from backend.use_cases.perimeter.zone_manager import ZoneManager
 from backend.api.websocket import manager
 
@@ -274,7 +275,11 @@ def stream():
 
                 image = frame.copy()
 
-                camera_manager.zone.annotate(image)
+                any_intrusion = any(
+                    p.get("in_perimeter") or p.get("leg_inside")
+                    for p in (camera_manager.people or [])
+                )
+                camera_manager.zone.annotate(image, is_intrusion=any_intrusion)
                 if camera_manager.in_thread and camera_manager.in_thread.is_alive():
                     camera_manager.headcount.annotate_out(image)
                 else:
@@ -294,18 +299,36 @@ def stream():
                     p_name = person.get("name")
                     tid = str(person["id"])
 
+                    # Draw knee/ankle pose keypoints & leg skeleton
+                    draw_leg_pose(image, person, camera_manager.zone)
+
                     # Fallback to face cache if person name is not set on current frame
                     if (not p_name or p_name == "Unknown") and hasattr(camera_manager, "_face_cache"):
                         cached_entry = camera_manager._face_cache.get(person["id"])
                         if cached_entry and cached_entry[0] and cached_entry[0] != "Unknown":
                             p_name = cached_entry[0]
 
-                    # Determine IN / OUT state for display (e.g. "Dharshan - IN" or "ID 3 - OUT")
+                    # Separate decisions: Face Auth vs Pose/Zone Intrusion
+                    is_auth = bool(p_name and p_name != "Unknown")
+                    is_leg_intrusion = person.get("leg_inside", False)
+                    is_in_perim = person.get("in_perimeter", False)
                     is_p_inside = (p_name and p_name in inside_emps) or (tid in inside_tids)
                     status_text = "IN" if is_p_inside else "OUT"
-                    disp_name = p_name.capitalize() if (p_name and p_name != "Unknown") else f"ID {tid}"
-                    disp_label = f"{disp_name} - {status_text} ({person['confidence']:.2f})"
-                    box_color = (34, 197, 94) if is_p_inside else (239, 68, 68)
+                    disp_name = p_name.capitalize() if is_auth else f"ID {tid}"
+                    auth_tag = "AUTH" if is_auth else "UNKNOWN"
+
+                    if is_leg_intrusion:
+                        disp_label = f"{disp_name} [{auth_tag} | LEG INTRUSION] - {status_text}"
+                        box_color = (0, 0, 255)
+                    elif is_in_perim:
+                        disp_label = f"{disp_name} [{auth_tag} | ZONE INTRUSION] - {status_text}"
+                        box_color = (0, 0, 255)
+                    elif is_auth:
+                        disp_label = f"{disp_name} [{auth_tag}] - {status_text} ({person['confidence']:.2f})"
+                        box_color = (34, 197, 94)
+                    else:
+                        disp_label = f"{disp_name} [{auth_tag}] - {status_text} ({person['confidence']:.2f})"
+                        box_color = (0, 215, 255)
 
                     cv2.rectangle(
                         image,

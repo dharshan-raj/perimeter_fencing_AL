@@ -80,8 +80,11 @@ class Settings(BaseSettings):
     camera_read_timeout: int = 10000
     camera_open_timeout: int = 10000
 
-    # --- YOLO Detection ---
+    # --- YOLO Detection & Pose Estimation ---
     model_path: str = "models/yolov8n.pt"
+    pose_enabled: bool = True
+    pose_model_path: str = "models/yolo11n-pose.pt"
+    pose_keypoint_confidence: float = 0.35
     person_confidence: float = 0.30
     iou_threshold: float = 0.45
     inference_fps: float = 3.0
