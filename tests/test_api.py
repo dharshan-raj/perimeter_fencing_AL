@@ -33,7 +33,7 @@ def test_camera_connection_does_not_claim_unconfigured_rtsp_is_online(monkeypatc
     monkeypatch.setattr(settings, "rtsp_url", "")
     monkeypatch.setattr(settings, "rtsp_ip", "")
     with TestClient(app) as client:
-        response=client.post("/api/cameras/14/test-connection",headers={"X-Admin-Token":settings.admin_token})
+        response=client.post("/api/cameras/14/test-connection")
         assert response.status_code==200
         assert response.json()["connected"] is False
         assert response.json()["tested"] is False

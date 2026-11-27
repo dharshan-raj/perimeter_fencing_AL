@@ -3,7 +3,7 @@ import { Camera, Circle, Maximize2, Play, Radio, WifiOff } from 'lucide-react';
 import ZoneEditor from '../ZoneEditor';
 import CameraStatus from './CameraStatus';
 
-export default function CameraFeed({ zone, onZoneChange, status, videoStatus, sourceConfigured, activeSource, processing, onToggleMonitoring, adminToken, onAdminTokenChange, editing, setEditing, reconnectAttempt = 0, retryInSeconds = 0, autoReconnect = true, large = false }) {
+export default function CameraFeed({ zone, onZoneChange, status, videoStatus, sourceConfigured, activeSource, processing, onToggleMonitoring, editing, setEditing, reconnectAttempt = 0, retryInSeconds = 0, autoReconnect = true, large = false }) {
   const [retry, setRetry] = useState(0);
   const [fps, setFps] = useState(0);
   const frameTimes = useRef([]);
@@ -29,7 +29,7 @@ export default function CameraFeed({ zone, onZoneChange, status, videoStatus, so
     </div>
     <div className="camera-frame feed">
       {sourceConfigured && <img key={retry} className="camera-image" src={`/api/stream.mjpg?retry=${retry}`} onLoad={recordFrame} onError={retryStream} alt="Live CCTV camera stream" />}
-      <ZoneEditor zone={zone} onZoneChange={onZoneChange} editing={editing} setEditing={setEditing} videoStatus={videoStatus} adminToken={adminToken} onAdminTokenChange={onAdminTokenChange} />
+      <ZoneEditor zone={zone} onZoneChange={onZoneChange} editing={editing} setEditing={setEditing} videoStatus={videoStatus} />
       <div className="frame-topline"><span><i /> CAM 14 · {sourceLabel}</span><span>{fps ? `${fps} FPS PREVIEW` : 'PREVIEW FPS —'}</span></div>
       {!connected && <div className="camera-offline-overlay"><div className="offline-symbol"><WifiOff size={20} /></div><strong>{status === 'Reconnecting' ? 'Attempting to reconnect' : status === 'Stopped' ? 'Monitoring stopped' : sourceConfigured ? 'Camera stream unavailable' : 'Camera source not configured'}</strong><span>{status === 'Reconnecting' && autoReconnect ? retryMessage : sourceConfigured ? 'Check the RTSP connection and camera network.' : 'Set the camera source in the backend .env file.'}</span></div>}
       {!sourceConfigured && <div className="camera-placeholder"><Radio size={24} /><span>CAMERA 14</span></div>}

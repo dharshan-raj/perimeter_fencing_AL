@@ -39,14 +39,11 @@ function paint(canvas, points, cursor, drawing) {
   });
 }
 
-export default function ZoneEditor({ zone, onZoneChange, editing, setEditing, videoStatus, adminToken: sharedToken, onAdminTokenChange }) {
+export default function ZoneEditor({ zone, onZoneChange, editing, setEditing, videoStatus }) {
   const canvasRef = useRef(null);
   const [points, setPoints] = useState(zone.points || []);
   const [cursor, setCursor] = useState(null);
   const [mode, setMode] = useState(zone.mode || 'crossing');
-  const [localToken, setLocalToken] = useState(() => localStorage.getItem('adminToken') || '');
-  const adminToken = sharedToken ?? localToken;
-  const setAdminToken = onAdminTokenChange ?? setLocalToken;
   const [saving, setSaving] = useState(false);
   const [startingCamera, setStartingCamera] = useState(false);
   const [message, setMessage] = useState('');
@@ -85,27 +82,23 @@ export default function ZoneEditor({ zone, onZoneChange, editing, setEditing, vi
     setSaving(true);
     setMessage('');
     try {
-      if (!adminToken.trim()) { setMessage('Enter the admin token to save this area.'); setSaving(false); return; }
-      localStorage.setItem('adminToken', adminToken.trim());
-      const saved = await post('/api/zones', { ...zone, name: zone.name || 'Restricted Area', mode, points }, adminToken.trim());
+      const saved = await post('/api/zones', { ...zone, name: zone.name || 'Restricted Area', mode, points });
       onZoneChange(saved);
       setEditing(false);
       setMessage('Restricted area saved.');
-    } catch (error) {
-      setMessage(error.message.includes('401') ? 'Save failed. Check the admin token.' : 'Could not save the area. Check the connection and admin token.');
+    } catch {
+      setMessage('Could not save the area. Check the backend connection.');
     } finally { setSaving(false); }
   };
 
   const startCamera = async () => {
-    if (!adminToken.trim()) { setMessage('Enter the admin token to restart the camera preview.'); return; }
     setStartingCamera(true);
     setMessage('');
     try {
-      localStorage.setItem('adminToken', adminToken.trim());
-      await post('/api/cameras/14/start', undefined, adminToken.trim());
+      await post('/api/cameras/14/start');
       setMessage('Camera preview is starting.');
     } catch {
-      setMessage('Could not start the camera. Check the admin token and camera connection.');
+      setMessage('Could not start the camera. Check the camera connection.');
     } finally { setStartingCamera(false); }
   };
 
@@ -127,7 +120,6 @@ export default function ZoneEditor({ zone, onZoneChange, editing, setEditing, vi
           </select>
           <button className="zone-action zone-save" onClick={save} disabled={saving || points.length < 3}><Save size={13} /> {saving ? 'Saving…' : 'Save area'}</button>
         </div>
-        <input className="zone-token" type="password" autoComplete="current-password" value={adminToken} onChange={event => setAdminToken(event.target.value)} placeholder="Admin token" aria-label="Admin token" />
         {videoStatus !== 'Connected' && <button className="zone-action zone-camera-start" onClick={startCamera} disabled={startingCamera}><Power size={13} />{startingCamera ? 'Starting camera…' : 'Start camera preview'}</button>}
         <div className="zone-hint">Click the feed to add points · {points.length} point{points.length === 1 ? '' : 's'} · 3 minimum</div>
       </>}

@@ -106,8 +106,8 @@ function downloadCsv(alerts) {
 }
 
 
-function evidenceUrl(path, token) {
-  if (!path || !token) return null;
+function evidenceUrl(path) {
+  if (!path) return null;
 
   const normalized = String(path).replaceAll('\\', '/');
   const marker = '/evidence/';
@@ -121,7 +121,7 @@ function evidenceUrl(path, token) {
     .map(encodeURIComponent)
     .join('/');
 
-  return `/api/evidence/${encodedPath}?token=${encodeURIComponent(token)}`;
+  return `/api/evidence/${encodedPath}`;
 }
 
 
@@ -148,7 +148,7 @@ function PageHeading({
 // EVIDENCE GALLERY
 // ---------------------------------------------------------
 
-function EvidenceGallery({ alerts, token }) {
+function EvidenceGallery({ alerts }) {
   const [records, setRecords] = useState([]);
 
   const alertIds = alerts
@@ -185,7 +185,7 @@ function EvidenceGallery({ alerts, token }) {
   return (
     <div className="evidence-grid">
       {records.map(record => {
-        const src = evidenceUrl(record.evidence_path, token);
+        const src = evidenceUrl(record.evidence_path);
 
         return (
           <article className="evidence-card" key={record.id}>
@@ -199,7 +199,7 @@ function EvidenceGallery({ alerts, token }) {
               <div className="evidence-no-image">
                 <ShieldAlert size={22} />
                 <span>
-                  Enter the admin token in Settings to load evidence.
+                  Evidence image unavailable.
                 </span>
               </div>
             )}
@@ -236,8 +236,6 @@ function EvidenceGallery({ alerts, token }) {
 // ---------------------------------------------------------
 
 function SettingsPanel({
-  token,
-  setToken,
   status,
   videoStatus,
   activeSource,
@@ -246,40 +244,6 @@ function SettingsPanel({
 }) {
   return (
     <div className="settings-grid">
-      <section className="panel settings-card">
-        <div className="panel-heading">
-          <div>
-            <span className="section-kicker">ADMIN ACCESS</span>
-            <h2>Administrative token</h2>
-          </div>
-          <ShieldAlert size={18} className="settings-icon" />
-        </div>
-
-        <p className="settings-copy">
-          Used by this browser for authenticated camera controls, zone
-          updates, and evidence images. The token is saved in local
-          browser storage.
-        </p>
-
-        <label className="form-label" htmlFor="admin-token">
-          Admin token
-        </label>
-
-        <input
-          id="admin-token"
-          className="settings-token"
-          type="password"
-          autoComplete="current-password"
-          value={token}
-          onChange={event => setToken(event.target.value)}
-          placeholder="Enter ADMIN_TOKEN from the backend .env file"
-        />
-
-        <span className="form-help">
-          The backend never sends its token to the browser. Keep it private.
-        </span>
-      </section>
-
       <section className="panel settings-card">
         <div className="panel-heading">
           <div>
@@ -719,10 +683,6 @@ export default function App() {
   const [clock, setClock] = useState(formatClock());
   const [filter, setFilter] = useState('All');
 
-  const [token, setToken] = useState(
-    () => localStorage.getItem('adminToken') || ''
-  );
-
   const [feedback, setFeedback] = useState('');
   const [refreshing, setRefreshing] = useState(false);
 
@@ -845,41 +805,15 @@ export default function App() {
 
 
   // -------------------------------------------------------
-  // ADMIN TOKEN
-  // -------------------------------------------------------
-
-  const handleTokenChange = value => {
-    setToken(value);
-
-    if (value) {
-      localStorage.setItem('adminToken', value);
-    } else {
-      localStorage.removeItem('adminToken');
-    }
-  };
-
-
-  // -------------------------------------------------------
   // CAMERA MONITORING CONTROL
   // -------------------------------------------------------
 
   const toggleMonitoring = async () => {
-    if (!token.trim()) {
-      setFeedback(
-        'Enter the admin token in Settings before starting or stopping camera monitoring.'
-      );
-
-      setPage('settings');
-      return;
-    }
-
     try {
       await post(
         processing
           ? '/api/cameras/14/stop'
-          : '/api/cameras/14/start',
-        undefined,
-        token.trim()
+          : '/api/cameras/14/start'
       );
 
       setFeedback(
@@ -889,11 +823,9 @@ export default function App() {
       );
 
       window.setTimeout(() => refresh(), 700);
-    } catch (error) {
+    } catch {
       setFeedback(
-        error.message.includes('401')
-          ? 'The admin token was rejected. Check it in Settings.'
-          : 'Camera control failed. Check the backend and camera configuration.'
+        'Camera control failed. Check the backend and camera configuration.'
       );
     }
   };
@@ -926,8 +858,6 @@ export default function App() {
     activeSource,
     processing,
     onToggleMonitoring: toggleMonitoring,
-    adminToken: token,
-    onAdminTokenChange: handleTokenChange,
     editing: zoneEditing,
     setEditing: setZoneEditing,
     reconnectAttempt: reconnectInfo.attempt,
@@ -1144,7 +1074,7 @@ export default function App() {
           {/* UNAUTHORISED MOVEMENT MONITORING */}
 
           {page === 'movement' && (
-            <MovementSecurityPage cameraProps={cameraProps} token={token} />
+            <MovementSecurityPage cameraProps={cameraProps} />
           )}
 
 
@@ -1189,11 +1119,10 @@ export default function App() {
             <>
               <div className="section-note">
                 <Check size={15} />
-                Images are loaded from existing alert details and the
-                authenticated evidence endpoint.
+                Images are loaded from saved security alert evidence.
               </div>
 
-              <EvidenceGallery alerts={alerts} token={token} />
+              <EvidenceGallery alerts={alerts} />
             </>
           )}
 
@@ -1202,8 +1131,6 @@ export default function App() {
 
           {page === 'settings' && (
             <SettingsPanel
-              token={token}
-              setToken={handleTokenChange}
               status={status}
               videoStatus={videoStatus}
               activeSource={activeSource}

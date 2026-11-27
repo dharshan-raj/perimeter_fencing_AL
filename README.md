@@ -120,7 +120,7 @@ The default model is `models/yolov8n.pt`. If absent, Ultralytics falls back to i
 
 ## Configuration
 
-All values are read from environment variables / `.env`; see `.env.example`. Relevant settings include confidence/IoU thresholds, inference FPS, alert cooldown, zone mode, and SQLite URL. Set `ADMIN_TOKEN` to a strong secret before using administrative endpoints. RTSP secrets must never be committed or sent to the browser.
+All values are read from environment variables / `.env`; see `.env.example`. Relevant settings include confidence/IoU thresholds, inference FPS, alert cooldown, zone mode, and SQLite URL. RTSP secrets must never be committed or sent to the browser.
 
 `RTSP_URL` may contain a complete RTSP URL. Alternatively, set `RTSP_USERNAME`, `RTSP_PASSWORD`, `RTSP_IP`, `RTSP_PORT`, `RTSP_CHANNEL`, and `RTSP_SUBTYPE`; the app builds a Dahua-style `/cam/realmonitor` URL and percent-encodes credentials. `RTSP_URL`, when nonempty, takes precedence over the component fields. Keep camera credentials in `.env` and do not commit them.
 
@@ -138,15 +138,8 @@ Modes: `crossing` alerts on an outside-to-inside transition; `intrusion` alerts 
 - `POST /api/cameras/14/test-connection` (admin token required)
 - `POST /api/cameras/14/start`, `/api/cameras/14/stop`
 - `POST /api/zones`, `POST /api/alerts/{id}/acknowledge`
-- `GET /api/evidence/{relative_path}?token=ADMIN_TOKEN`
+- `GET /api/evidence/{relative_path}`
 - `WS /ws/alerts`
-
-Administrative POSTs require `X-Admin-Token: <ADMIN_TOKEN>`. For example:
-
-```powershell
-$headers = @{ 'X-Admin-Token' = 'your-local-admin-token' }
-Invoke-RestMethod -Method Post -Uri http://localhost:8000/api/cameras/14/start -Headers $headers
-```
 
 For production, place the app behind HTTPS and authentication, restrict allowed origins, protect the evidence endpoint with a real user/session identity layer, and use PostgreSQL by setting `DATABASE_URL`. The default setup is a local development configuration; it does not implement user accounts/RBAC or TLS termination.
 

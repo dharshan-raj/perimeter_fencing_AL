@@ -59,7 +59,6 @@ class Settings(BaseSettings):
     boundary_mode: str = "crossing"
     approach_distance: int = 35
     database_url: str = "sqlite:///./perimeter_monitor.db"
-    admin_token: str = "change-this-before-exposing-admin-api"
     evidence_dir: str = "evidence"
     model_config = SettingsConfigDict(env_file=ROOT / ".env", extra="ignore", case_sensitive=False)
     @property

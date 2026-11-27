@@ -162,20 +162,6 @@ app.add_middleware(
 
 
 # =========================================================
-# ADMIN AUTHENTICATION
-# =========================================================
-
-def admin(
-    x_admin_token: str | None = Header(default=None)
-):
-    if x_admin_token != settings.admin_token:
-        raise HTTPException(
-            status_code=401,
-            detail="Valid X-Admin-Token required"
-        )
-
-
-# =========================================================
 # HEALTH CHECK
 # =========================================================
 
@@ -255,10 +241,7 @@ def camera_status():
     }
 
 
-@app.post(
-    "/api/cameras/14/test-connection",
-    dependencies=[Depends(admin)]
-)
+@app.post("/api/cameras/14/test-connection")
 def test_camera_connection():
 
     result = camera_manager.test_connection()
@@ -481,10 +464,7 @@ def alert_detail(
     }
 
 
-@app.post(
-    "/api/alerts/{alert_id}/acknowledge",
-    dependencies=[Depends(admin)]
-)
+@app.post("/api/alerts/{alert_id}/acknowledge")
 def acknowledge(
     alert_id: int,
     db: Session = Depends(get_db)
@@ -588,10 +568,7 @@ def get_zone():
     return camera_manager.zone.zone
 
 
-@app.post(
-    "/api/zones",
-    dependencies=[Depends(admin)]
-)
+@app.post("/api/zones")
 def set_zone(payload: dict):
 
     try:
@@ -605,10 +582,7 @@ def set_zone(payload: dict):
 # EXISTING CAMERA START / STOP
 # =========================================================
 
-@app.post(
-    "/api/cameras/14/start",
-    dependencies=[Depends(admin)]
-)
+@app.post("/api/cameras/14/start")
 def start():
 
     camera_manager.start()
@@ -616,10 +590,7 @@ def start():
     return {"status": "starting"}
 
 
-@app.post(
-    "/api/cameras/14/stop",
-    dependencies=[Depends(admin)]
-)
+@app.post("/api/cameras/14/stop")
 def stop():
 
     camera_manager.stop()
@@ -634,14 +605,7 @@ def stop():
 @app.get("/api/evidence/{filename:path}")
 def evidence(
     filename: str,
-    token: str = Query(...)
 ):
-
-    if token != settings.admin_token:
-        raise HTTPException(
-            401,
-            "Authentication required"
-        )
 
     root = Path(settings.evidence_dir).resolve()
 
@@ -670,10 +634,7 @@ DEFAULT_GATE_NAME = "Plant Entrance Gate 3"
 # REGISTER ENTRY / EXIT EVENT
 # ---------------------------------------------------------
 
-@app.post(
-    "/api/headcount/events",
-    dependencies=[Depends(admin)]
-)
+@app.post("/api/headcount/events")
 def create_headcount_event(
     payload: HeadcountEventCreate,
     db: Session = Depends(get_db)
@@ -1240,7 +1201,7 @@ def get_movement_zones():
     }
 
 
-@app.post("/api/movement/events", dependencies=[Depends(admin)])
+@app.post("/api/movement/events")
 def create_movement_event_manual(
     payload: MovementEventCreate,
     db: Session = Depends(get_db),

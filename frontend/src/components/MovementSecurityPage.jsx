@@ -397,7 +397,7 @@ export default function MovementSecurityPage({ cameraProps, token }) {
             </div>
             <div className="snapshot-modal-body">
               <img
-                src={token ? `${selectedSnapshot}?token=${token}` : selectedSnapshot}
+                src={selectedSnapshot}
                 alt="Incident Snapshot"
                 style={{ width: '100%', maxHeight: '70vh', objectFit: 'contain', borderRadius: '0.375rem' }}
               />
