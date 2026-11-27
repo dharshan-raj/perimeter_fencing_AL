@@ -6,7 +6,7 @@ than phone photos).
   python scripts/enroll_from_camera.py --name dharshan --from-dir C:/path/to/cctv_snapshots
 
 Ask the employee to walk toward the camera while it runs. Only ONE person should be in
-frame. Saved face crops go to shared/employee_face/<name>/cam_*.jpg and are picked up
+frame. Saved face crops go to data/employees/<name>/cam_*.jpg and are picked up
 automatically next start (the embedding cache refreshes itself when photos change).
 """
 import argparse, os, sys, time
@@ -24,7 +24,7 @@ ap.add_argument("--from-dir")
 ap.add_argument("--min-face", type=int, default=45, help="minimum face width in pixels")
 args = ap.parse_args()
 
-out = Path("shared/employee_face") / args.name.lower()
+out = Path("data/employees") / args.name.lower()
 out.mkdir(parents=True, exist_ok=True)
 app = FaceAnalysis(name="buffalo_l", providers=["CPUExecutionProvider"])
 app.prepare(ctx_id=-1, det_size=(640, 640))
@@ -58,8 +58,8 @@ if args.from_dir:
         if img is not None:
             try_save(img)
 else:
-    from shared.config import settings
-    from shared.camera.rtsp_stream import RTSPStream
+    from config.settings import settings
+    from backend.camera.rtsp_stream import RTSPStream
     stream = RTSPStream(settings.source, settings.source_kind)
     deadline = time.time() + 180
     last = 0.0

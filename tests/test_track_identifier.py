@@ -1,12 +1,12 @@
 import numpy as np
 import pytest
 
-from shared.face_recognition import embedding_cache
-from shared.face_recognition.face_quality import (
+from backend.ai import embedding_cache
+from backend.ai.face_quality import (
     face_blur_score, is_person_big_enough, prepare_person_crop,
 )
-from shared.face_recognition.insightface_engine import InsightFaceEngine
-from shared.face_recognition.track_identifier import (
+from backend.ai.face_recognition import InsightFaceEngine
+from backend.ai.track_identifier import (
     IDENTIFIED, PENDING, UNIDENTIFIED, TrackIdentifier,
 )
 

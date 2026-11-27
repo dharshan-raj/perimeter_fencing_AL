@@ -2,15 +2,15 @@
 import sys, time, os
 sys.path.insert(0, os.getcwd())
 import cv2
-from shared.config import settings
-from shared.camera.rtsp_stream import RTSPStream
-from shared.detection.detector import PersonDetector
-from shared.face_recognition.employee_registry import EmployeeRegistry
+from config.settings import settings
+from backend.camera.rtsp_stream import RTSPStream
+from backend.ai.detector import PersonDetector
+from backend.ai.employee_registry import EmployeeRegistry
 
 N_FRAMES = int(sys.argv[1]) if len(sys.argv) > 1 else 40
 os.makedirs("scratch_faces", exist_ok=True)
 
-reg = EmployeeRegistry("shared/employee_face")
+reg = EmployeeRegistry("data/employees")
 reg.load_employees(max_photos_per_employee=5)
 eng = reg.engine
 det = PersonDetector()

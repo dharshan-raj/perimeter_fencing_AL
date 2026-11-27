@@ -2,7 +2,7 @@ from fastapi.testclient import TestClient
 from datetime import datetime, timedelta, timezone
 
 from main import _utc_isoformat, app, camera_manager
-from shared.config import settings
+from config.settings import settings
 
 
 def test_utc_isoformat_marks_naive_database_timestamps_as_utc():

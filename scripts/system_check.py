@@ -2,7 +2,7 @@ import socket, sqlite3, sys, os, json
 sys.path.insert(0, os.getcwd())
 
 print("== CAMERA REACHABILITY ==")
-from shared.config import settings
+from config.settings import settings
 print("source kind:", settings.source_kind, "| ip:", settings.rtsp_ip, "port:", settings.rtsp_port, "| face_v2:", settings.face_v2_enabled)
 try:
     s = socket.create_connection((settings.rtsp_ip, settings.rtsp_port), timeout=4); s.close()
@@ -42,11 +42,11 @@ with TestClient(app) as client:
             print("ERR", p, e)
 
 print("== GATE LINES ==")
-from entry_exit_headcount.headcount_manager import HeadcountManager
+from backend.use_cases.headcount.headcount_manager import HeadcountManager
 h = HeadcountManager()
 print("two_lines:", h.two_lines, "IN:", h.line_in_start, h.line_in_end, "OUT:", h.line_out_start, h.line_out_end)
 
 print("== FACE REGISTRY (cache) ==")
-from shared.face_recognition.embedding_cache import list_employee_photos
-print({k: len(v) for k, v in list_employee_photos("shared/employee_face").items()})
-print("cache file exists:", os.path.exists("shared/employee_face/.embeddings_cache.npz"))
+from backend.ai.embedding_cache import list_employee_photos
+print({k: len(v) for k, v in list_employee_photos("data/employees").items()})
+print("cache file exists:", os.path.exists("data/employees/.embeddings_cache.npz"))

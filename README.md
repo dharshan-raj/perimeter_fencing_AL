@@ -6,60 +6,49 @@ A modular Camera 14 monitoring application. FastAPI runs an isolated camera work
 
 ```text
 Perimeter Fencing/
-├── main.py                              # FastAPI entry point (REST API, MJPEG stream, WebSockets)
-├── start.py                             # Backend server launcher (uvicorn main:app)
+├── main.py                              # FastAPI entry point (`python main.py`)
+├── start.py                             # Alternative server launcher
 ├── run_opencv.py                        # Standalone OpenCV desktop live monitor
 ├── .env / .env.example                  # Environment & camera configuration
 ├── requirements.txt                     # Python dependencies
 ├── perimeter_monitor.db                 # SQLite database (auto-created)
 │
-├── perimeter_fencing/                   # Use Case 1: Perimeter Intrusion Detection
-│   ├── __init__.py
-│   ├── intrusion_detector.py            # Intrusion, crossing, approach & authorization logic
-│   ├── zone_manager.py                  # Normalized polygon zone loader & frame annotator
-│   ├── evidence_service.py              # Annotated evidence JPEG snapshot saver
-│   └── zones.json                       # Perimeter polygon coords & allowed_employees
-│
-├── entry_exit_headcount/                # Use Case 2: Entry / Exit Headcount & Attendance
-│   ├── __init__.py
-│   ├── headcount_detector.py            # Detection normalization & footpoint computation
-│   ├── headcount_manager.py             # Single/dual gate line manager & HUD overlay
-│   ├── line_counter.py                  # Geometric line-crossing & cooldown deduplication
-│   ├── headcount_report.py              # Daily & monthly attendance report generator
-│   └── gates.json                       # Virtual gate line coords & detection thresholds
-│
-├── movement_security/                   # Use Case 3: Unauthorised Movement Detection
-│   ├── __init__.py
-│   ├── movement_evaluator.py            # 5 security rules (unknown, restricted, role, after-hours, repeat)
+├── config/                              # All Configuration Files
+│   ├── settings.py                      # Pydantic settings loaded from .env
+│   ├── zones.json                       # Perimeter polygon coords & allowed_employees
+│   ├── gates.json                       # Entry/Exit virtual gate line coords & thresholds
 │   └── movement_rules.json              # Restricted zone polygons, employee roles & shift hours
 │
-├── shared/                              # Shared Core Infrastructure
-│   ├── __init__.py
-│   ├── config.py                        # Pydantic settings loaded from .env
-│   ├── database.py                      # SQLAlchemy engine, SessionLocal & Base
-│   ├── models.py                        # ORM models (Camera, Alert, HeadcountEvent, MovementEvent, etc.)
-│   ├── schemas.py                       # Pydantic API request/response schemas
+├── backend/                             # All Python Application Logic
 │   ├── camera/
-│   │   ├── __init__.py
 │   │   ├── camera_manager.py            # Unified CCTV pipeline (YOLO + ByteTrack + FaceRec + 3 use cases)
 │   │   └── rtsp_stream.py               # OpenCV/FFmpeg RTSP stream reader with auto-reconnect
-│   ├── detection/
-│   │   ├── __init__.py
-│   │   └── detector.py                  # YOLOv8 + ByteTrack person detector
-│   ├── face_recognition/
-│   │   ├── __init__.py
-│   │   ├── insightface_engine.py        # InsightFace buffalo_l ONNX wrapper
+│   ├── ai/
+│   │   ├── detector.py                  # YOLOv8 + ByteTrack person detector
+│   │   ├── face_recognition.py          # InsightFace buffalo_l ONNX wrapper
 │   │   ├── employee_registry.py         # Enrolled employee face loader & matcher
 │   │   ├── track_identifier.py          # Async multi-frame identity resolver per tracking ID
 │   │   ├── face_quality.py              # Upper-body crop, upscaling & blur scoring
-│   │   ├── embedding_cache.py           # Fast .embeddings_cache.npz persistence
-│   │   └── train_employee_faces.py      # Offline face embedding training script
-│   ├── employee_face/                   # Registered employee photo folders & cache
-│   ├── services/
-│   │   ├── __init__.py
-│   │   └── websocket_manager.py         # Real-time WebSocket alert broadcaster
-│   └── utils/
-│       └── __init__.py
+│   │   └── embedding_cache.py           # Fast .embeddings_cache.npz persistence
+│   ├── use_cases/
+│   │   ├── perimeter/                   # Use Case 1: Perimeter Fencing
+│   │   │   ├── intrusion_detector.py
+│   │   │   └── zone_manager.py
+│   │   ├── headcount/                   # Use Case 2: Entry / Exit Headcount
+│   │   │   ├── headcount_detector.py
+│   │   │   ├── headcount_manager.py
+│   │   │   └── line_counter.py
+│   │   └── movement/                    # Use Case 3: Unauthorised Movement Detection
+│   │       └── movement_evaluator.py
+│   ├── api/
+│   │   └── websocket.py                 # Real-time WebSocket alert broadcaster
+│   ├── database/
+│   │   ├── database.py                  # SQLAlchemy engine, SessionLocal & Base
+│   │   ├── models.py                    # ORM models (Camera, Alert, HeadcountEvent, MovementEvent)
+│   │   └── schemas.py                   # Pydantic API request/response schemas
+│   └── services/
+│       ├── evidence_service.py          # Annotated evidence JPEG snapshot saver
+│       └── report_service.py            # Daily & monthly headcount attendance report generator
 │
 ├── frontend/                            # React + Vite Dashboard UI
 │   ├── package.json
@@ -68,17 +57,14 @@ Perimeter Fencing/
 │       ├── App.jsx
 │       ├── ZoneEditor.jsx
 │       └── components/
-│           ├── Sidebar.jsx
-│           ├── CameraFeed.jsx
-│           ├── CameraStatus.jsx
-│           ├── HeadcountPanel.jsx
-│           ├── HeadcountAnalytics.jsx
-│           ├── MovementSecurityPage.jsx
-│           └── StatCard.jsx
 │
-├── models/                              # Local YOLO & InsightFace (.insightface) weights
-├── evidence/                            # Saved intrusion & movement evidence snapshots
-├── scripts/                             # Diagnostic & face enrollment helper scripts
+├── data/                                # Employee Photos & Embeddings
+│   ├── employees/                       # Registered employee photo folders & .embeddings_cache.npz
+│   └── face_embeddings/                 # Saved face embedding archives
+│
+├── models/                              # Local YOLO (.pt / .engine) & InsightFace weights
+├── evidence/                            # Saved perimeter & movement evidence snapshots
+├── scripts/                             # Diagnostic, training & enrollment scripts
 └── tests/                               # Pytest unit test suite
 ```
 
@@ -124,7 +110,7 @@ All values are read from environment variables / `.env`; see `.env.example`. Rel
 
 `RTSP_URL` may contain a complete RTSP URL. Alternatively, set `RTSP_USERNAME`, `RTSP_PASSWORD`, `RTSP_IP`, `RTSP_PORT`, `RTSP_CHANNEL`, and `RTSP_SUBTYPE`; the app builds a Dahua-style `/cam/realmonitor` URL and percent-encodes credentials. `RTSP_URL`, when nonempty, takes precedence over the component fields. Keep camera credentials in `.env` and do not commit them.
 
-`perimeter_fencing/zones.json` stores polygon vertices as normalized `[x,y]` values in `[0,1]` along with `allowed_employees`. Adjust the points to the Camera 14 view. The supplied polygon is an example overlay and must be calibrated against the actual scene. Zone changes can be sent to `POST /api/zones` with `{ "name":"Restricted Area", "mode":"crossing", "points":[[0.7,0.3],[0.98,0.3],[0.98,0.98],[0.7,0.98]] }`.
+`config/zones.json` stores polygon vertices as normalized `[x,y]` values in `[0,1]` along with `allowed_employees`. Adjust the points to the Camera 14 view. The supplied polygon is an example overlay and must be calibrated against the actual scene. Zone changes can be sent to `POST /api/zones` with `{ "name":"Restricted Area", "mode":"crossing", "points":[[0.7,0.3],[0.98,0.3],[0.98,0.98],[0.7,0.98]] }`.
 
 Modes: `crossing` alerts on an outside-to-inside transition; `intrusion` alerts on first entry into the zone; `approach` warns when a person's bottom-center anchor is within `APPROACH_DISTANCE` pixels of its boundary. Alerts use track IDs and cooldowns. Event evidence stores the annotated frame in `evidence/YYYY/MM/camera_14/`.
 

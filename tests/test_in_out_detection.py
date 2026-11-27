@@ -1,5 +1,5 @@
 import pytest
-from entry_exit_headcount.headcount_manager import HeadcountManager
+from backend.use_cases.headcount.headcount_manager import HeadcountManager
 
 def test_known_and_unknown_in_and_out():
     """
@@ -60,7 +60,7 @@ def test_known_and_unknown_in_and_out():
     assert final_counts["current_inside"] == 0
 
 def test_gates_json_config_loading():
-    """Verify that HeadcountManager loads line and threshold settings from entry_exit_headcount/gates.json."""
+    """Verify that HeadcountManager loads line and threshold settings from config/gates.json."""
     manager = HeadcountManager()
     assert manager.line_start == (150, 560)
     assert manager.line_end == (1050, 560)

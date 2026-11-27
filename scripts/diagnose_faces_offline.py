@@ -3,12 +3,12 @@ import sys, os, glob
 sys.path.insert(0, os.getcwd())
 import cv2, numpy as np
 from ultralytics import YOLO
-from shared.face_recognition.employee_registry import EmployeeRegistry
+from backend.ai.employee_registry import EmployeeRegistry
 
 files = sorted(glob.glob("evidence/**/*.jpg", recursive=True))
 step = max(1, len(files) // int(sys.argv[1]))
 files = files[::step][: int(sys.argv[1])]
-reg = EmployeeRegistry("shared/employee_face"); reg.load_employees(5)
+reg = EmployeeRegistry("data/employees"); reg.load_employees(5)
 eng = reg.engine
 yolo = YOLO("models/yolov8n.pt") if os.path.exists("models/yolov8n.pt") else YOLO("yolov8n.pt")
 os.makedirs("scratch_faces", exist_ok=True)

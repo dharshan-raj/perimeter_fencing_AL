@@ -32,18 +32,18 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 
-from shared.config import settings
-from shared.database import Base, engine, get_db, SessionLocal
-from shared import models
-from shared.schemas import (
+from config.settings import settings
+from backend.database.database import Base, engine, get_db, SessionLocal
+from backend.database import models
+from backend.database.schemas import (
     HeadcountEventCreate,
     MovementEventCreate,
     MovementEventResponse,
     MovementSummaryResponse,
 )
-from shared.camera.camera_manager import camera_manager
-from perimeter_fencing.zone_manager import ZoneManager
-from shared.services.websocket_manager import manager
+from backend.camera.camera_manager import camera_manager
+from backend.use_cases.perimeter.zone_manager import ZoneManager
+from backend.api.websocket import manager
 
 
 # =========================================================
@@ -1227,3 +1227,8 @@ def create_movement_event_manual(
     db.refresh(ev)
     return {"status": "success", "event_id": ev.id}
 
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=False)

@@ -1,7 +1,7 @@
 import pytest
 import numpy as np
 from datetime import datetime, timezone
-from movement_security.movement_evaluator import MovementSecurityEngine
+from backend.use_cases.movement.movement_evaluator import MovementSecurityEngine
 
 
 @pytest.fixture
