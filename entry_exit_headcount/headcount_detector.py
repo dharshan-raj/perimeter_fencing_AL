@@ -1,215 +1,152 @@
 # ============================================================
 # FILE: entry_exit_headcount/headcount_detector.py
-# PURPOSE: Normalizes YOLO person detections and computes footpoints for gate line crossing
-# USE CASE: Entry / Exit Headcount (Use Case 2)
+# PURPOSE: Validates and normalizes existing YOLO + ByteTrack
+#          person detections for Gate 3 directional counting.
+#          Does NOT run a second YOLO model — reuses detections
+#          already produced by shared/detection/detector.py.
+# USE CASE: Entry/Exit Headcount (Use Case 2)
+#
+# HOW IT WORKS:
+#   - Receives a list of raw person dicts from CameraManager.
+#   - Filters out low-confidence or invalid detections.
+#   - Computes footpoint (bottom-center) and lower_point (75% down)
+#     used by LineCounter for crossing detection.
+#
 # DEBUG TIPS:
-#   - If people are skipped: check confidence_threshold in entry_exit_headcount/gates.json
-#   - Footpoint is bottom-center (cx, y2); lower_point is 75% down bounding box
+#   - Headcount always 0?
+#       → Confirm people list is non-empty (check camera_manager.people).
+#       → Confidence threshold default is 0.35 — lower if no detections pass.
+#   - Person footpoint wrong?
+#       → lower_point = y1 + 0.75*(y2-y1). Check box coords are in px.
+#   - Unexpected skipped detections?
+#       → Look for "Invalid person detection skipped" in logs (WARNING level).
+#   - Frame shape error?
+#       → Must be (height, width, channels) — raw OpenCV BGR frame.
+#
+# OUTPUT FORMAT per person:
+#   {
+#     "id": str,          "confidence": float,
+#     "box": (x1,y1,x2,y2),
+#     "footpoint": (cx, y2),
+#     "lower_point": (cx, y1 + 0.75*(y2-y1)),
+#     "center": (cx, cy),
+#     "frame_width": int, "frame_height": int
+#   }
+#
+# DEPENDENCIES:
+#   - Called by: entry_exit_headcount/headcount_manager.py
 # ============================================================
 
-
-"""
-Headcount Detector
-------------------
-
-Processes existing YOLOv8 + ByteTrack person detections
-for Plant Entrance Gate 3.
-
-This module does NOT initialize another YOLO model.
-It reuses detections from the existing CameraManager.
-"""
-
 import logging
-
 from typing import Any
-
 
 logger = logging.getLogger(__name__)
 
 
 class HeadcountDetector:
+    """
+    Validates and prepares raw YOLO detections for Gate 3 line counting.
+    Does NOT instantiate a new YOLO model.
+    """
 
     def __init__(self, confidence_threshold: float = 0.35):
-
         self.confidence_threshold = confidence_threshold
+        logger.info("Gate 3 Headcount Detector initialized (threshold=%.2f)", confidence_threshold)
 
-        logger.info(
-            "Gate 3 Headcount Detector initialized"
-        )
-
-    # =====================================================
-    # PROCESS EXISTING PERSON DETECTIONS
-    # =====================================================
-
-    def process(
-        self,
-        people: list[dict],
-        frame_shape: tuple
-    ) -> list[dict]:
-
+    def process(self, people: list[dict], frame_shape: tuple) -> list[dict]:
         """
-        Validate and prepare existing tracked people
-        for Gate 3 directional counting.
+        Validate and normalize detected people for the counting pipeline.
 
         Args:
-            people:
-                YOLOv8 + ByteTrack detection results.
-
-            frame_shape:
-                Current camera frame dimensions.
+            people      : Raw YOLO+ByteTrack detections from CameraManager.
+            frame_shape : (height, width, channels) of the current frame.
 
         Returns:
-            List of normalized person detection records.
-        """
+            List of normalized person dicts with footpoint & lower_point.
 
+        DEBUG: Empty return list?
+               → Check people input is not empty.
+               → Check confidence_threshold vs actual detections.
+               → Ensure frame_shape is a valid 2D+ tuple.
+        """
         if not people or len(frame_shape) < 2:
             return []
 
         frame_height, frame_width = frame_shape[:2]
-
         if frame_width <= 0 or frame_height <= 0:
             return []
 
         processed_people = []
 
         for person in people:
-
             try:
-
                 tracking_id = person.get("id")
-
-                confidence = float(
-                    person.get("confidence", 0)
-                )
-
+                confidence = float(person.get("confidence", 0))
                 box = person.get("box")
 
-                # -----------------------------------------
-                # Validate tracking ID
-                # -----------------------------------------
-
+                # Skip detections without a tracking ID
                 if tracking_id is None:
                     continue
 
-                # -----------------------------------------
-                # Confidence filtering
-                # -----------------------------------------
-
+                # Skip low-confidence detections
                 if confidence < self.confidence_threshold:
                     continue
 
-                # -----------------------------------------
-                # Validate bounding box
-                # -----------------------------------------
-
+                # Skip invalid bounding boxes
                 if not box or len(box) != 4:
                     continue
 
                 x1, y1, x2, y2 = map(int, box)
-
                 if x2 <= x1 or y2 <= y1:
                     continue
 
-                # -----------------------------------------
-                # Keep coordinates within frame
-                # -----------------------------------------
-
+                # Clamp coordinates to frame boundaries
                 x1 = max(0, min(x1, frame_width - 1))
                 y1 = max(0, min(y1, frame_height - 1))
-
                 x2 = max(0, min(x2, frame_width - 1))
                 y2 = max(0, min(y2, frame_height - 1))
 
                 if x2 <= x1 or y2 <= y1:
                     continue
 
-                # -----------------------------------------
-                # Calculate person footpoint
-                # -----------------------------------------
-
                 center_x = int((x1 + x2) / 2)
 
-                bottom_y = y2
+                # footpoint = bottom-center of bounding box
+                footpoint = (center_x, y2)
 
-                footpoint = (
-                    center_x,
-                    bottom_y
-                )
-
-                lower_point = (
-                    center_x,
-                    int(y1 + 0.75 * (y2 - y1))
-                )
-
-                # -----------------------------------------
-                # Prepare normalized detection
-                # -----------------------------------------
+                # lower_point = 75% down the box — avoids upper doorway line issues
+                lower_point = (center_x, int(y1 + 0.75 * (y2 - y1)))
 
                 processed_people.append({
-
                     "id": str(tracking_id),
-
                     "confidence": confidence,
-
-                    "box": (
-                        x1,
-                        y1,
-                        x2,
-                        y2
-                    ),
-
+                    "box": (x1, y1, x2, y2),
                     "footpoint": footpoint,
-
                     "lower_point": lower_point,
-
-                    "center": (
-                        center_x,
-                        int((y1 + y2) / 2)
-                    ),
-
+                    "center": (center_x, int((y1 + y2) / 2)),
                     "frame_width": frame_width,
-
-                    "frame_height": frame_height
-
+                    "frame_height": frame_height,
                 })
 
             except (TypeError, ValueError, KeyError):
-                logger.warning(
-                    "Invalid person detection skipped"
-                )
-
+                logger.warning("Invalid person detection skipped")
                 continue
 
         return processed_people
 
-    # =====================================================
-    # GET PERSON FOOTPOINT
-    # =====================================================
-
     @staticmethod
     def get_footpoint(person: dict) -> tuple[int, int] | None:
-
         """
-        Return the bottom-center point of a person's
-        bounding box.
+        Return bottom-center of a person's bounding box.
+        Falls back to computing from box if footpoint not pre-calculated.
 
-        This point is useful for determining whether
-        a person crossed the Gate 3 counting line.
+        DEBUG: Returns None if box is missing or malformed.
         """
-
         footpoint = person.get("footpoint")
-
         if footpoint:
             return tuple(footpoint)
-
         box = person.get("box")
-
         if not box or len(box) != 4:
             return None
-
         x1, y1, x2, y2 = box
-
-        return (
-            int((x1 + x2) / 2),
-            int(y2)
-        )
+        return (int((x1 + x2) / 2), int(y2))

@@ -1,76 +1,66 @@
 # ============================================================
 # FILE: shared/schemas.py
-# PURPOSE: Pydantic request and response schemas for FastAPI REST endpoints
-# USE CASE: Shared Infrastructure (API Schemas)
+# PURPOSE: Pydantic request/response schemas for all FastAPI
+#          API endpoints across all 3 use cases.
+# USE CASE: All (Shared)
+#
+# SCHEMAS DEFINED:
+#   ZonePayload              → POST /api/zones (Use Case 1)
+#   HeadcountEventCreate     → POST /api/headcount/events (Use Case 2)
+#   HeadcountEventResponse   → GET  /api/headcount/events response
+#   HeadcountSummary         → GET  /api/headcount/live response
+#   HeadcountReport          → GET  /api/headcount/report/daily response
+#   EmployeeTimingRecord     → Employee timing records
+#   EmployeeAttendanceSummary → Attendance summary per employee
+#   MovementEventCreate      → POST /api/movement/events (Use Case 3)
+#   MovementEventResponse    → GET  /api/movement/events response
+#   MovementSummaryResponse  → GET  /api/movement/summary response
+#
 # DEBUG TIPS:
-#   - Keep schema field names aligned with SQLAlchemy columns in shared/models.py
+#   - 422 Unprocessable Entity from API?
+#       → Pydantic validation failed. Check request body matches schema.
+#       → Check required fields: camera_id, tracking_id, direction, event_key.
+#   - Zone update rejected?
+#       → ZonePayload.points must have >= 3 items (min_length=3).
+#       → mode must be: "crossing" | "intrusion" | "approach"
+#   - Timestamp serialization issues?
+#       → All datetime fields are stored/returned as UTC ISO 8601 strings.
 # ============================================================
-
 
 from datetime import datetime
 from typing import Literal
-
 from pydantic import BaseModel, Field, ConfigDict
 
 
 # =========================================================
-# EXISTING: PERIMETER ZONE SCHEMA
+# USE CASE 1: PERIMETER ZONE
 # =========================================================
 
 class ZonePayload(BaseModel):
+    """Request body for updating the perimeter zone polygon via POST /api/zones."""
     name: str = "Restricted Area"
-
     mode: Literal["crossing", "intrusion", "approach"] = "crossing"
-
     points: list[tuple[float, float]] = Field(min_length=3)
 
 
 # =========================================================
-# NEW: HEADCOUNT EVENT SCHEMA
+# USE CASE 2: HEADCOUNT EVENTS
 # =========================================================
 
 class HeadcountEventCreate(BaseModel):
+    """Request body for manually recording a gate crossing event."""
     camera_id: int = Field(gt=0)
-
-    gate_name: str = Field(
-        default="Plant Entrance Gate 3",
-        min_length=1,
-        max_length=100
-    )
-
-    tracking_id: str = Field(
-        min_length=1,
-        max_length=80
-    )
-
-    employee_name: str | None = Field(
-        default=None,
-        max_length=100
-    )
-
+    gate_name: str = Field(default="Plant Entrance Gate 3", min_length=1, max_length=100)
+    tracking_id: str = Field(min_length=1, max_length=80)
+    employee_name: str | None = Field(default=None, max_length=100)
     direction: Literal["IN", "OUT"]
-
-    event_key: str = Field(
-        min_length=1,
-        max_length=100
-    )
-
-    confidence: float | None = Field(
-        default=None,
-        ge=0.0,
-        le=1.0
-    )
-
+    event_key: str = Field(min_length=1, max_length=100)
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
     event_timestamp: datetime | None = None
 
 
-# =========================================================
-# NEW: HEADCOUNT EVENT RESPONSE
-# =========================================================
-
 class HeadcountEventResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
-
     id: int
     camera_id: int
     gate_name: str
@@ -81,10 +71,6 @@ class HeadcountEventResponse(BaseModel):
     confidence: float | None
     event_timestamp: datetime
 
-
-# =========================================================
-# NEW: EMPLOYEE TIMING & ATTENDANCE SCHEMAS
-# =========================================================
 
 class EmployeeTimingRecord(BaseModel):
     id: int
@@ -100,50 +86,34 @@ class EmployeeAttendanceSummary(BaseModel):
     first_entry: str | None = None
     last_exit: str | None = None
     last_direction: str | None = None
-    status: str = "Unknown"  # "Inside" or "Outside"
+    status: str = "Unknown"   # "Inside" or "Outside"
     total_entries: int = 0
     total_exits: int = 0
 
 
-# =========================================================
-# NEW: LIVE HEADCOUNT RESPONSE
-# =========================================================
-
 class HeadcountSummary(BaseModel):
     gate_name: str
-
     total_in: int = 0
-
     total_out: int = 0
-
     opening_count: int = 0
-
     current_inside: int = 0
 
 
-# =========================================================
-# NEW: HEADCOUNT REPORT SCHEMA
-# =========================================================
-
 class HeadcountReport(BaseModel):
     gate_name: str
-
     report_date: str
-
     total_in: int = 0
-
     total_out: int = 0
-
     opening_count: int = 0
-
     closing_count: int = 0
 
 
 # =========================================================
-# NEW: UNAUTHORISED MOVEMENT SCHEMAS
+# USE CASE 3: MOVEMENT SECURITY EVENTS
 # =========================================================
 
 class MovementEventCreate(BaseModel):
+    """Request body for manually recording a movement security event."""
     camera_id: int = Field(gt=0)
     tracking_id: str
     employee_id: str | None = None
@@ -160,7 +130,6 @@ class MovementEventCreate(BaseModel):
 
 class MovementEventResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
-
     id: int
     camera_id: int
     tracking_id: str
@@ -185,4 +154,3 @@ class MovementSummaryResponse(BaseModel):
     today_violations: int = 0
     restricted_zones_active: int = 0
     last_updated: str
-

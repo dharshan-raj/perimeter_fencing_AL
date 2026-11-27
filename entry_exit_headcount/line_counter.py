@@ -1,12 +1,37 @@
 # ============================================================
 # FILE: entry_exit_headcount/line_counter.py
-# PURPOSE: Performs geometric line-crossing math, confirmation frames, and cooldown deduplication
-# USE CASE: Entry / Exit Headcount (Use Case 2)
+# PURPOSE: Counts people crossing a virtual gate line drawn
+#          across the camera frame. Handles both entry (IN)
+#          and exit (OUT) directions using cross-product geometry.
+# USE CASE: Entry/Exit Headcount (Use Case 2)
+#
+# HOW IT WORKS:
+#   - For each person, computes which side of the line they are on.
+#   - Detects when a person transitions from one side to the other.
+#   - Requires confirmation_frames consecutive frames on the new side
+#     before counting — reduces false positives from jitter.
+#   - enforce_entry_first: an OUT event requires this person to have
+#     previously triggered an IN event (prevents ghost exits).
+#
 # DEBUG TIPS:
-#   - Gate line start and end points must be distinct coordinates
-#   - Tune confirmation_frames, line_margin, and cooldown_seconds in gates.json
+#   - Counts not incrementing?
+#       → Confirm line_start != line_end (raises ValueError if same).
+#       → Check footpoint/lower_point is a valid (x, y) in frame pixels.
+#       → Increase line_margin if person crosses near line endpoints.
+#   - Double-counting?
+#       → Reduce cooldown (default 3.0s). Increase confirmation_frames.
+#   - Person counted as OUT without entering?
+#       → Set enforce_entry_first=True in gates.json.
+#   - Ghost tracks persisting?
+#       → cleanup_tracks() removes tracks not seen for track_ttl seconds.
+#
+# ENTRY/EXIT DIRECTION RULES:
+#   A_TO_B: Negative side → Positive side = IN
+#   B_TO_A: Negative side → Positive side = OUT
+#
+# DEPENDENCIES:
+#   - Called by: entry_exit_headcount/headcount_manager.py
 # ============================================================
-
 
 import math
 import time
@@ -15,19 +40,11 @@ from collections import deque
 
 class LineCounter:
     """
-    Counts people entering and leaving through a virtual gate line.
+    Counts IN/OUT crossings over a virtual gate line defined by two pixel endpoints.
 
-    Direction rules:
-        A_TO_B:
-            Negative side -> Positive side = IN
-            Positive side -> Negative side = OUT
-
-        B_TO_A:
-            Negative side -> Positive side = OUT
-            Positive side -> Negative side = IN
-
-    A crossing is counted only after the person remains on the
-    opposite side for the configured confirmation_frames.
+    Usage:
+        counter = LineCounter(line_start=(500,100), line_end=(500,900))
+        events = counter.process(people)   # list of person dicts with "footpoint"
     """
 
     def __init__(
@@ -43,7 +60,6 @@ class LineCounter:
     ):
         self.line_start = tuple(line_start)
         self.line_end = tuple(line_end)
-
         self.entry_direction = entry_direction.upper()
         self.confirmation_frames = max(1, int(confirmation_frames))
         self.cooldown = float(cooldown)
@@ -51,14 +67,11 @@ class LineCounter:
         self.line_margin = float(line_margin)
 
         if self.entry_direction not in ("A_TO_B", "B_TO_A"):
-            raise ValueError(
-                "entry_direction must be 'A_TO_B' or 'B_TO_A'"
-            )
-
+            raise ValueError("entry_direction must be 'A_TO_B' or 'B_TO_A'")
         if self.line_start == self.line_end:
             raise ValueError("Gate line start and end cannot be the same")
 
-        # Tracking information for each person.
+        # Per-person tracking state
         self.track_history = {}
         self.previous_sides = {}
         self.stable_points = {}
@@ -67,260 +80,159 @@ class LineCounter:
         self.last_seen_time = {}
         self.track_ttl = 5.0
 
-        # Total counts.
+        # Running totals
         self.total_in = 0
         self.total_out = 0
 
-        # Strict entry-first enforcement
-        # When True, OUT events require prior entry or active inside count
+        # Strict entry-first enforcement: OUT requires a prior IN for this tracking ID
         self.enforce_entry_first = enforce_entry_first
         self.inside_tracking_ids = set()
 
-    # ---------------------------------------------------------
+    # ----------------------------------------------------------
     # GEOMETRY HELPERS
-    # ---------------------------------------------------------
+    # ----------------------------------------------------------
 
     def _side_of_line(self, point):
         """
-        Returns:
-            1  = Positive side
-            -1 = Negative side
-            0  = Exactly on the line
+        Cross-product sign determines which side of the line a point is on.
+        Returns: 1 (positive side), -1 (negative side), 0 (exactly on line).
         """
-
         x1, y1 = self.line_start
         x2, y2 = self.line_end
         px, py = point
+        cross = (x2 - x1) * (py - y1) - (y2 - y1) * (px - x1)
+        return 1 if cross > 0 else (-1 if cross < 0 else 0)
 
-        cross_product = (
-            (x2 - x1) * (py - y1)
-            - (y2 - y1) * (px - x1)
-        )
-
-        if cross_product > 0:
-            return 1
-
-        if cross_product < 0:
-            return -1
-
-        return 0
-
-    def _get_intersection(self, previous_point, current_point):
-        """
-        Calculates where the person's movement path intersects
-        the virtual gate line.
-
-        Returns intersection coordinates or None.
-        """
-
-        px, py = previous_point
-        qx, qy = current_point
-
+    def _get_intersection(self, prev, curr):
+        """Find where the movement path intersects the gate line segment."""
+        px, py = prev
+        qx, qy = curr
         ax, ay = self.line_start
         bx, by = self.line_end
-
-        rx = qx - px
-        ry = qy - py
-
-        sx = bx - ax
-        sy = by - ay
-
-        denominator = rx * sy - ry * sx
-
-        if abs(denominator) < 1e-9:
+        rx, ry = qx - px, qy - py
+        sx, sy = bx - ax, by - ay
+        denom = rx * sy - ry * sx
+        if abs(denom) < 1e-9:
             return None
-
-        t = ((ax - px) * sy - (ay - py) * sx) / denominator
-
-        # The movement segment (0 <= t <= 1) must cross the gate line;
-        # _is_crossing_gate checks whether the intersection falls within
-        # the gate segment plus line_margin.
+        t = ((ax - px) * sy - (ay - py) * sx) / denom
         if 0 <= t <= 1:
-            intersection_x = px + t * rx
-            intersection_y = py + t * ry
-
-            return (intersection_x, intersection_y)
-
+            return (px + t * rx, py + t * ry)
         return None
 
-    def _is_crossing_gate(self, previous_point, current_point):
+    def _is_crossing_gate(self, prev, curr):
         """
-        Checks whether movement crosses the actual gate segment,
-        rather than an unlimited imaginary line.
+        True only if movement actually crosses within the gate segment
+        (plus line_margin extension at each end).
         """
-
-        intersection = self._get_intersection(
-            previous_point,
-            current_point
-        )
-
-        if intersection is None:
+        pt = self._get_intersection(prev, curr)
+        if pt is None:
             return False
-
-        ix, iy = intersection
+        ix, iy = pt
         ax, ay = self.line_start
         bx, by = self.line_end
-
-        line_length = math.hypot(bx - ax, by - ay)
-
-        if line_length == 0:
+        length = math.hypot(bx - ax, by - ay)
+        if length == 0:
             return False
+        proj = ((ix - ax) * (bx - ax) + (iy - ay) * (by - ay)) / length
+        return -self.line_margin <= proj <= length + self.line_margin
 
-        # Distance along the gate line to the intersection.
-        projection = (
-            ((ix - ax) * (bx - ax))
-            + ((iy - ay) * (by - ay))
-        ) / line_length
-
-        return (
-            -self.line_margin
-            <= projection
-            <= line_length + self.line_margin
-        )
-
-    def _get_direction(self, previous_side, current_side):
-        """
-        Determines whether the person is entering or leaving.
-        """
-
-        if previous_side == current_side:
+    def _get_direction(self, prev_side, curr_side):
+        """Return 'IN', 'OUT', or None based on side transition and entry_direction."""
+        if prev_side == curr_side:
             return None
-
         if self.entry_direction == "A_TO_B":
-            if previous_side == -1 and current_side == 1:
+            if prev_side == -1 and curr_side == 1:
                 return "IN"
-
-            if previous_side == 1 and current_side == -1:
+            if prev_side == 1 and curr_side == -1:
                 return "OUT"
-
         else:
-            if previous_side == -1 and current_side == 1:
+            if prev_side == -1 and curr_side == 1:
                 return "OUT"
-
-            if previous_side == 1 and current_side == -1:
+            if prev_side == 1 and curr_side == -1:
                 return "IN"
-
         return None
 
-    # ---------------------------------------------------------
+    # ----------------------------------------------------------
     # PERSON PROCESSING
-    # ---------------------------------------------------------
+    # ----------------------------------------------------------
 
     def process_person(self, person):
         """
-        Processes one detected person.
+        Evaluate one person for a confirmed gate crossing.
 
-        Expected person format:
-        {
-            "id": "tracking_id",
-            "footpoint": (x, y),
-            "confidence": 0.90
-        }
+        Args:
+            person (dict): Must contain "id" and either "footpoint" or "box".
 
-        Returns a crossing event dictionary or None.
+        Returns:
+            dict | None: Crossing event dict, or None if no confirmed crossing.
+
+        DEBUG: Returns None always?
+               → Check line_start != line_end.
+               → Confirm footpoint is updated each frame (not same point).
+               → Increase line_margin if person crosses near line endpoints.
         """
-
         tracking_id = person.get("id")
-
         if tracking_id is None:
             return None
-
         tracking_id = str(tracking_id)
 
-        # Use footpoint when available.
+        # Resolve footpoint
         footpoint = person.get("footpoint")
-
-        # Otherwise calculate bottom-center from bounding box.
         if footpoint is None:
             box = person.get("box")
-
             if not box or len(box) != 4:
                 return None
-
             x1, y1, x2, y2 = box
+            footpoint = ((x1 + x2) / 2, y2)
 
-            footpoint = (
-                (x1 + x2) / 2,
-                y2
-            )
-
-        current_point = (
-            float(footpoint[0]),
-            float(footpoint[1])
-        )
+        current_point = (float(footpoint[0]), float(footpoint[1]))
         self.last_seen_time[tracking_id] = time.time()
-
         current_side = self._side_of_line(current_point)
 
-        # Ignore points exactly on the line.
-        # Keep the previous stable side unchanged.
+        # Ignore points on the line itself
         if current_side == 0:
             return None
 
-        # Save position history.
         if tracking_id not in self.track_history:
-            self.track_history[tracking_id] = deque(
-                maxlen=self.history_size
-            )
+            self.track_history[tracking_id] = deque(maxlen=self.history_size)
 
         history = self.track_history[tracking_id]
         previous_point = history[-1] if history else None
         history.append(current_point)
 
-        # First time seeing this person.
+        # First sighting: establish baseline side
         if tracking_id not in self.previous_sides:
             self.previous_sides[tracking_id] = current_side
             self.stable_points[tracking_id] = current_point
             return None
 
         stable_side = self.previous_sides[tracking_id]
-
-        # Person is still on the same side.
         if current_side == stable_side:
             self.stable_points[tracking_id] = current_point
             self.crossing_candidates.pop(tracking_id, None)
             return None
 
-        # Check that the movement actually crossed the gate segment.
+        # Check whether the actual gate segment was crossed
         candidate = self.crossing_candidates.get(tracking_id)
-
         if candidate is None:
-            anchor_point = self.stable_points.get(tracking_id) or previous_point
-            if anchor_point is None:
+            anchor = self.stable_points.get(tracking_id) or previous_point
+            if anchor is None:
                 return None
-
-            if not self._is_crossing_gate(
-                anchor_point,
-                current_point
-            ):
+            if not self._is_crossing_gate(anchor, current_point):
                 return None
-
-            candidate = {
-                "side": current_side,
-                "frames": 1,
-                "previous_side": stable_side,
-            }
-
+            candidate = {"side": current_side, "frames": 1, "previous_side": stable_side}
             self.crossing_candidates[tracking_id] = candidate
-
         else:
-            # The person must remain on the same new side.
             if current_side != candidate["side"]:
                 self.crossing_candidates.pop(tracking_id, None)
                 return None
-
             candidate["frames"] += 1
 
-        # Wait until the new side is confirmed.
+        # Require confirmation frames
         if candidate["frames"] < self.confirmation_frames:
             return None
 
-        direction = self._get_direction(
-            candidate["previous_side"],
-            candidate["side"]
-        )
-
-        # Update stable side after confirmation.
+        direction = self._get_direction(candidate["previous_side"], candidate["side"])
         self.previous_sides[tracking_id] = candidate["side"]
         self.stable_points[tracking_id] = current_point
         self.crossing_candidates.pop(tracking_id, None)
@@ -328,23 +240,16 @@ class LineCounter:
         if direction is None:
             return None
 
-        # Requirement 1 & 3: Person must enter first and only entered person can exit
-        # If enforce_entry_first is enabled:
-        # - An OUT event is only allowed if this tracking_id previously entered and is inside!
-        if self.enforce_entry_first:
-            if direction == "OUT" and tracking_id not in self.inside_tracking_ids:
-                return None
-
-        # Prevent repeated counting during quick detection changes.
-        current_time = time.time()
-        last_time = self.last_count_time.get(tracking_id, 0)
-
-        if current_time - last_time < self.cooldown:
+        # Enforce entry-first: OUT requires prior IN for this tracking ID
+        if self.enforce_entry_first and direction == "OUT" and tracking_id not in self.inside_tracking_ids:
             return None
 
-        self.last_count_time[tracking_id] = current_time
+        # Cooldown: prevent duplicate counts within cooldown window
+        now = time.time()
+        if now - self.last_count_time.get(tracking_id, 0) < self.cooldown:
+            return None
 
-        # Update totals and inside set.
+        self.last_count_time[tracking_id] = now
         if direction == "IN":
             self.total_in += 1
             self.inside_tracking_ids.add(tracking_id)
@@ -358,80 +263,42 @@ class LineCounter:
             "direction": direction,
             "confidence": person.get("confidence"),
             "footpoint": current_point,
-            "timestamp": current_time,
+            "timestamp": now,
         }
 
-    # ---------------------------------------------------------
-    # PROCESS ALL PEOPLE
-    # ---------------------------------------------------------
-
     def process(self, people):
-        """
-        Processes all detected people in the current frame.
-
-        Returns a list of confirmed crossing events.
-        """
-
-        events = []
-
-        for person in people:
-            event = self.process_person(person)
-
-            if event is not None:
-                events.append(event)
-
-        return events
-
-    # ---------------------------------------------------------
-    # COUNTS
-    # ---------------------------------------------------------
+        """Process all detected people and return confirmed crossing events."""
+        return [e for p in people if (e := self.process_person(p)) is not None]
 
     def get_counts(self):
-        """Returns current IN and OUT totals."""
-
+        """Return current IN/OUT totals and computed inside count."""
         return {
             "total_in": self.total_in,
             "total_out": self.total_out,
-            "current_inside": max(
-                0,
-                self.total_in - self.total_out
-            ),
+            "current_inside": max(0, self.total_in - self.total_out),
         }
 
     def reset_counts(self):
-        """Resets the IN and OUT totals."""
-
+        """Reset IN/OUT totals and inside tracking set."""
         self.total_in = 0
         self.total_out = 0
         self.inside_tracking_ids.clear()
 
-    # ---------------------------------------------------------
-    # TRACK CLEANUP
-    # ---------------------------------------------------------
-
     def cleanup_tracks(self, active_ids):
         """
-        Removes tracking data for people no longer detected.
+        Remove tracking state for people not seen recently.
 
-        active_ids should contain the IDs detected in the
-        current frame.
+        DEBUG: Stale tracks causing phantom events?
+               → track_ttl = max(5.0, cooldown*2). Reduce if needed.
         """
-
-        active_ids = {str(track_id) for track_id in active_ids}
+        active_ids = {str(tid) for tid in active_ids}
         now = time.time()
         ttl = max(self.track_ttl, self.cooldown * 2)
-
-        tracked_ids = set(self.track_history.keys())
-
-        inactive_ids = tracked_ids - active_ids
-
-        for tracking_id in inactive_ids:
-            # Keep track state alive during brief YOLO/ByteTrack occlusions
-            if now - self.last_seen_time.get(tracking_id, 0) < ttl:
-                continue
-            self.track_history.pop(tracking_id, None)
-            self.previous_sides.pop(tracking_id, None)
-            self.stable_points.pop(tracking_id, None)
-            self.crossing_candidates.pop(tracking_id, None)
-            self.last_count_time.pop(tracking_id, None)
-            self.last_seen_time.pop(tracking_id, None)
+        for tid in list(self.track_history.keys()):
+            if tid not in active_ids and now - self.last_seen_time.get(tid, 0) >= ttl:
+                self.track_history.pop(tid, None)
+                self.previous_sides.pop(tid, None)
+                self.stable_points.pop(tid, None)
+                self.crossing_candidates.pop(tid, None)
+                self.last_count_time.pop(tid, None)
+                self.last_seen_time.pop(tid, None)

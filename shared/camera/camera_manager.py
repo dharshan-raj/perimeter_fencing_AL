@@ -1,16 +1,65 @@
 # ============================================================
 # FILE: shared/camera/camera_manager.py
-# PURPOSE: Central background worker managing RTSP capture, YOLO, ByteTrack, FaceRec, and all 3 use cases
-# USE CASE: Shared Infrastructure (Core Pipeline)
+# PURPOSE: Central camera processing worker. Manages RTSP stream,
+#          runs YOLO detection, face recognition, and dispatches
+#          events to all 3 use case modules each frame.
+# USE CASE: All (Shared — orchestrates all 3 use cases)
+#
+# HOW IT WORKS:
+#   - CameraManager.start() launches a background thread (_run).
+#   - Each frame: detect persons → recognize faces → evaluate all 3 use cases.
+#   - Use Case 1 (Perimeter): IntrusionDetector.evaluate() per person.
+#   - Use Case 2 (Headcount): HeadcountManager.process() per frame.
+#   - Use Case 3 (Movement):  MovementSecurityEngine.evaluate() per frame.
+#   - Dual camera: _run_in_camera() runs Channel 1 (IN) separately.
+#   - All DB writes and WebSocket broadcasts happen inside _run().
+#
 # DEBUG TIPS:
-#   - Single shared pipeline: never duplicate RTSP capture or YOLO inference
-#   - If tracking IDs drop between frames: increase INFERENCE_FPS in .env (recommended >= 8)
-#   - Check self.face_registry and self.track_identifier logs if names show as Unknown
+#   - Camera not starting?
+#       → Check CAMERA_AUTO_START=true and VIDEO_SOURCE in .env.
+#       → Check camera_manager.status — "Reconnecting" means stream not yet connected.
+#       → Log shows retry attempts with backoff delay.
+#   - Detection not running?
+#       → YOLO loads after first valid frame. Check "Detector initialization failed" in logs.
+#       → Confirm yolov8n.pt exists in project root or MODEL_PATH in .env.
+#   - Face recognition not identifying employees?
+#       → Check "Face recognition registry could not load" in logs.
+#       → Confirm shared/employee_face/<name>/imageN.jpg exist.
+#       → Lower FACE_MATCH_THRESHOLD in .env (default 0.40).
+#   - Headcount not counting?
+#       → Check gates.json has correct line coordinates.
+#       → Check DUAL_GATE_CAMERAS and SOURCE_IN in .env for dual camera mode.
+#   - Movement security not alerting?
+#       → Check movement_rules.json has valid zones with absolute pixel coords.
+#       → Confirm "enabled": true in movement_rules.json.
+#   - DB errors during frame processing?
+#       → Check "Video processing failed" / "Headcount processing failed" in logs.
+#       → Intrusion detection errors do NOT stop headcount/movement processing.
+#
+# SINGLETON:
+#   camera_manager = CameraManager()   ← imported and used by main.py
+#
+# DEPENDENCIES:
+#   - shared/config.py                           → settings
+#   - shared/database.py                         → SessionLocal
+#   - shared/models.py                           → Camera, Alert, etc.
+#   - shared/detection/detector.py               → PersonDetector (YOLO)
+#   - shared/camera/rtsp_stream.py               → RTSPStream, configured_source
+#   - perimeter_fencing/zone_manager.py          → ZoneManager
+#   - perimeter_fencing/intrusion_detector.py    → IntrusionDetector
+#   - perimeter_fencing/evidence_service.py      → save()
+#   - entry_exit_headcount/headcount_manager.py  → HeadcountManager
+#   - movement_security/movement_evaluator.py    → MovementSecurityEngine
 # ============================================================
 
-import threading, time, logging, cv2, math
+import threading
+import time
+import logging
+import cv2
+import math
 from datetime import datetime, timezone
 from pathlib import Path
+
 from shared.config import settings
 from shared.database import SessionLocal
 from shared.models import Camera, Alert, DetectionLog, SystemLog, HeadcountEvent, MovementEvent
@@ -19,13 +68,20 @@ from movement_security.movement_evaluator import MovementSecurityEngine
 from shared.detection.detector import PersonDetector
 from perimeter_fencing.zone_manager import ZoneManager
 from perimeter_fencing.intrusion_detector import IntrusionDetector
-from .rtsp_stream import RTSPStream, configured_source
+from shared.camera.rtsp_stream import RTSPStream, configured_source
 from perimeter_fencing.evidence_service import save
 
 log = logging.getLogger(__name__)
 
 
 class CameraManager:
+    """
+    Singleton camera processing orchestrator.
+
+    Manages the RTSP stream and coordinates all 3 use case pipelines
+    (perimeter fencing, headcount, movement security) on each frame.
+    """
+
     def __init__(self):
         self.thread = None
         self.stop_event = threading.Event()
@@ -44,18 +100,21 @@ class CameraManager:
         self.reconnect_attempt = 0
         self.retry_in_seconds = 0.0
         self.connection_lock = threading.Lock()
-        # Headcount uses the SAME detected people and frames as perimeter monitoring.
-        # Its virtual counting line is configured independently in entry_exit_headcount/gates.json.
+
+        # Use Case 2: Headcount — reuses same detections as perimeter
         self.headcount = HeadcountManager()
-        # ── Movement Security Engine (Unauthorized Movement Detection) ─────
+
+        # Use Case 3: Movement Security
         self.movement_security = MovementSecurityEngine()
-        # ── Face recognition (loaded lazily after first frame) ──────────────
+
+        # Face recognition (lazy-loaded after first frame)
         self.face_registry = None
-        self.track_identifier = None          # multi-frame identity (face v2)
-        self._face_registry_loaded = False   # True once load attempted (even if failed)
-        self._face_cache: dict = {}           # {tracking_id: (name, timestamp)}
-        self._face_cache_ttl = 3.0           # re-recognise each track every 3 s
-        # ── Companion Gate 3 IN Camera (Channel 1) ──────────────────────────
+        self.track_identifier = None           # multi-frame face v2
+        self._face_registry_loaded = False
+        self._face_cache: dict = {}            # {tracking_id: (name, timestamp)}
+        self._face_cache_ttl = 3.0
+
+        # Dual Gate 3 IN Camera (Channel 1) state
         self.in_thread = None
         self.in_stream = None
         self.in_status = "Disconnected"
@@ -66,6 +125,13 @@ class CameraManager:
         self._in_face_cache: dict = {}
 
     def start(self):
+        """
+        Start the camera processing thread.
+        Also starts the Channel 1 (IN) thread if dual_gate_cameras is enabled.
+
+        DEBUG: start() returns False?
+               → Thread is already running. Call stop() first if you need to restart.
+        """
         if self.thread and self.thread.is_alive():
             return False
         self.stop_event.clear()
@@ -82,10 +148,14 @@ class CameraManager:
         return True
 
     def stop(self):
+        """Signal all camera threads to stop."""
         self.stop_event.set()
 
     def test_connection(self):
-        """Never opens another capture while the processing worker owns the camera."""
+        """
+        Test camera connectivity without opening a second capture.
+        Uses the existing stream if running, otherwise probes briefly.
+        """
         with self.connection_lock:
             if self.thread and self.thread.is_alive() and self.stream is not None:
                 fresh = self.stream.connected and self.stream.last_frame and time.time() - self.stream.last_frame < 10
@@ -104,6 +174,21 @@ class CameraManager:
         publish_from_thread({"event_type": "Camera Disconnected", "severity": "WARNING"})
 
     def _run(self):
+        """
+        Main camera processing loop (runs in background thread).
+
+        Frame pipeline per iteration:
+          1. Read frame from RTSPStream
+          2. Run YOLO + ByteTrack detection
+          3. Run InsightFace face recognition (lazy, async)
+          4. Use Case 1: Perimeter intrusion evaluation → Alert DB + WebSocket
+          5. Use Case 2: Headcount crossing → HeadcountEvent DB + WebSocket
+          6. Use Case 3: Movement security → MovementEvent DB + WebSocket
+
+        DEBUG: "Camera worker stopped" in logs?
+               → Check the exception message that follows.
+               → Most likely: DB error, detector crash, or stream read failure.
+        """
         from main import publish_from_thread
 
         db = None
@@ -146,6 +231,7 @@ class CameraManager:
             cam_id = camera.id
 
             while not self.stop_event.is_set():
+                # --- Sample fallback if no primary stream configured ---
                 if primary_stream is None:
                     fallback = Path(settings.sample_video_path) if settings.sample_video_path else None
                     if (settings.sample_fallback_enabled and fallback and fallback.is_file()
@@ -154,11 +240,12 @@ class CameraManager:
                         stream = sample_stream
                         using_sample = True
                         self.active_source = "sample"
-                        log.warning("Using configured development sample video; RTSP URL is not configured")
+                        log.warning("Using configured development sample video")
                     else:
                         self.stop_event.wait(1.0)
                         continue
 
+                # --- Check if primary recovered while sample was active ---
                 if using_sample and primary_stream is not None and settings.camera_auto_reconnect:
                     camera_ok, camera_frame = primary_stream.read()
                     self.reconnect_attempt = primary_stream.retry_attempt
@@ -200,17 +287,15 @@ class CameraManager:
                         stream = sample_stream
                         using_sample = True
                         self.active_source = "sample"
-                        log.warning("Using configured development sample video after camera source timeout; RTSP retries continue")
+                        log.warning("Using configured development sample video after camera source timeout")
                         continue
                     if not settings.camera_auto_reconnect and not using_sample:
                         break
                     if not using_sample and failed_stream:
-                        wait = max(0.1, failed_stream.retry_wait_seconds)
-                        if self.stop_event.wait(wait):
+                        if self.stop_event.wait(max(0.1, failed_stream.retry_wait_seconds)):
                             break
                     elif using_sample and sample_stream:
-                        wait = max(0.1, sample_stream.retry_wait_seconds)
-                        if self.stop_event.wait(min(wait, 1.0)):
+                        if self.stop_event.wait(min(max(0.1, sample_stream.retry_wait_seconds), 1.0)):
                             break
                     continue
 
@@ -240,13 +325,13 @@ class CameraManager:
                     self.status = "Disconnected"
 
                 if not video_was_connected:
-                    source_description = "development sample video" if using_sample else "video source"
-                    log.info("%s connected", source_description.capitalize())
-                    db.add(SystemLog(log_level="INFO", message=f"{source_description.capitalize()} connected"))
+                    src_desc = "development sample video" if using_sample else "video source"
+                    log.info("%s connected", src_desc.capitalize())
+                    db.add(SystemLog(log_level="INFO", message=f"{src_desc.capitalize()} connected"))
                     db.commit()
                 video_was_connected = True
 
-                 # Initialize YOLO after the first valid decoded frame, then reuse it.
+                # --- Initialize YOLO detector (once, after first valid frame) ---
                 if detector is None:
                     if time.monotonic() < next_detector_retry:
                         self.stop_event.wait(0.1)
@@ -262,7 +347,7 @@ class CameraManager:
                         self.stop_event.wait(0.1)
                         continue
 
-                # ── Lazy-load face registry once detector is ready ──────────
+                # --- Lazy-load face registry (once, after detector ready) ---
                 if not self._face_registry_loaded:
                     try:
                         from shared.face_recognition.employee_registry import EmployeeRegistry
@@ -276,18 +361,18 @@ class CameraManager:
                                 log.info("Face recognition v2 (multi-frame) enabled")
                             except Exception as exc:
                                 log.warning("Face recognition v2 unavailable, using v1: %s", exc)
-                        log.info(
-                            "Employee face registry loaded: %d employees",
-                            len(registry.employee_embeddings),
-                        )
+                        log.info("Employee face registry loaded: %d employees", len(registry.employee_embeddings))
                     except Exception as exc:
                         log.warning("Face recognition registry could not load: %s", exc)
                     finally:
-                        self._face_registry_loaded = True  # don't retry every frame
+                        self._face_registry_loaded = True
 
+                # --- Throttle inference to inference_fps ---
                 if time.time() - last_inference < 1 / max(settings.inference_fps, 0.1):
                     continue
                 last_inference = time.time()
+
+                # --- YOLO + ByteTrack detection ---
                 try:
                     people = detector.detect_track(frame)
                     self.people = people
@@ -297,7 +382,7 @@ class CameraManager:
                     db.commit()
                     continue
 
-                # ── Per-person face recognition (cached per tracking-ID) ────
+                # --- Face recognition (cached per tracking ID) ---
                 _now = time.time()
                 _v2_done = False
                 if self.track_identifier is not None:
@@ -305,7 +390,6 @@ class CameraManager:
                         self.track_identifier.update_async(people, frame, _now)
                         for _p in people:
                             if _p.get("identity_state") == "IDENTIFIED":
-                                # Keeps the Gate 3 attendance fallback lookup working.
                                 self._face_cache[_p["id"]] = (_p["name"], _now)
                             elif not _p.get("name") and _p["id"] in self._face_cache:
                                 _c_name, _ = self._face_cache[_p["id"]]
@@ -314,36 +398,25 @@ class CameraManager:
                         _v2_done = True
                     except Exception:
                         log.exception("Face recognition v2 failed; falling back to v1")
+
                 for _person in ([] if _v2_done else people):
                     _tid = _person["id"]
                     _cached = self._face_cache.get(_tid)
-                    # If this person is already recognized as an employee, keep the name!
-                    # Do not re-run CPU face recognition on an already matched employee.
                     if _cached:
                         if _cached[0] != "Unknown":
                             _person["name"] = _cached[0]
                             continue
-                        # If previously Unknown, only retry after cache TTL
                         if _now - _cached[1] < self._face_cache_ttl:
                             _person["name"] = _cached[0]
                             continue
-
                     if self.face_registry is not None:
                         try:
                             _x1, _y1, _x2, _y2 = _person["box"]
-                            # Use the upper 45 % of the bounding box as the face region
                             _face_h = max(1, math.ceil((_y2 - _y1) * 0.45))
-                            _face_crop = frame[
-                                max(0, _y1) : _y1 + _face_h,
-                                max(0, _x1) : max(_x1 + 1, _x2),
-                            ]
+                            _face_crop = frame[max(0, _y1):_y1 + _face_h, max(0, _x1):max(_x1 + 1, _x2)]
                             if _face_crop.size > 0:
                                 _result = self.face_registry.recognize_employee(_face_crop)
-                                _name = (
-                                    _result["employee_id"].capitalize()
-                                    if _result["status"] == "MATCHED"
-                                    else "Unknown"
-                                )
+                                _name = _result["employee_id"].capitalize() if _result["status"] == "MATCHED" else "Unknown"
                             else:
                                 _name = "Unknown"
                         except Exception:
@@ -352,16 +425,10 @@ class CameraManager:
                         _name = "Unknown"
                     self._face_cache[_tid] = (_name, _now)
                     _person["name"] = _name
-                # Evict cache entries for tracks that are no longer visible
                 _active_ids = {p["id"] for p in people}
                 self._face_cache = {k: v for k, v in self._face_cache.items() if k in _active_ids}
 
-                # ---------------------------------------------------------
-                # NEW: GATE 3 HEADCOUNT PROCESSING
-                # Reuses the exact same YOLO + ByteTrack detections. No second
-                # camera capture or second YOLO inference is created.
-                # HeadcountManager.process() returns only confirmed crossings.
-                # ---------------------------------------------------------
+                # --- Use Case 2: Gate 3 Headcount Processing ---
                 headcount_payloads = []
                 try:
                     use_dual = bool(self.in_thread and self.in_thread.is_alive())
@@ -373,36 +440,23 @@ class CameraManager:
 
                     for event in headcount_events:
                         event_key = str(event.get("event_key") or f"{event.get('gate_name')}_{event.get('tracking_id')}_{event.get('direction')}_{int(time.time())}")
-
-                        # Extra database-level duplicate check. The unique
-                        # constraint on HeadcountEvent.event_key is the final guard.
-                        already_saved = db.query(HeadcountEvent.id).filter_by(
-                            event_key=event_key
-                        ).first()
-                        if already_saved:
+                        if db.query(HeadcountEvent.id).filter_by(event_key=event_key).first():
                             continue
-
                         event_timestamp = event.get("event_timestamp")
                         if not isinstance(event_timestamp, datetime):
                             event_timestamp = datetime.now(timezone.utc)
-
-                        # Match tracking ID to employee name from recognition
-                        # Line counter returns tracking_id as str; detector ids are int.
                         _evt_tid = str(event.get("tracking_id"))
                         _emp_name = event.get("employee_name")
                         if not _emp_name:
                             for p in people:
-                                if str(p["id"]) == _evt_tid:
-                                    n = p.get("name")
-                                    if n and n != "Unknown":
-                                        _emp_name = n
+                                if str(p["id"]) == _evt_tid and p.get("name") and p.get("name") != "Unknown":
+                                    _emp_name = p.get("name")
                                     break
                         if not _emp_name:
                             for k, c in self._face_cache.items():
                                 if str(k) == _evt_tid and c[0] and c[0] != "Unknown":
                                     _emp_name = c[0]
                                     break
-
                         db.add(HeadcountEvent(
                             camera_id=cam_id,
                             gate_name=event.get("gate_name", "Plant Entrance Gate 3"),
@@ -411,9 +465,8 @@ class CameraManager:
                             direction=str(event["direction"]).upper(),
                             event_key=event_key,
                             confidence=event.get("confidence"),
-                            event_timestamp=event_timestamp
+                            event_timestamp=event_timestamp,
                         ))
-
                         headcount_payloads.append({
                             "event_type": "Headcount Event",
                             "severity": "INFO",
@@ -423,68 +476,77 @@ class CameraManager:
                             "employee_name": _emp_name,
                             "direction": str(event["direction"]).upper(),
                             "confidence": event.get("confidence"),
-                            "event_timestamp": event_timestamp.isoformat()
+                            "event_timestamp": event_timestamp.isoformat(),
                         })
-
                 except Exception as exc:
-                    # A headcount configuration/processing issue must not stop
-                    # the existing perimeter intrusion detection pipeline.
+                    # Headcount error must NOT stop perimeter detection pipeline
                     log.exception("Gate 3 headcount processing failed")
-                    db.add(SystemLog(
-                        log_level="ERROR",
-                        message="Headcount processing failed: " + str(exc)[:300]
-                    ))
+                    db.add(SystemLog(log_level="ERROR", message="Headcount processing failed: " + str(exc)[:300]))
 
+                # --- Use Case 1: Perimeter Intrusion Detection per person ---
                 for person in people:
                     tracking_id = person["id"]
                     if tracking_id not in self.seen_person_ids:
                         self.seen_person_ids.add(tracking_id)
                         self.total_people += 1
                     state = intrusion.evaluate(person, frame.shape, settings.alert_cooldown)
-                    db.add(DetectionLog(camera_id=cam_id, tracking_id=str(tracking_id), confidence=person["confidence"],
-                                        bounding_box=str(person["box"]), zone_status="Inside" if state["inside"] else "Outside"))
+                    db.add(DetectionLog(
+                        camera_id=cam_id,
+                        tracking_id=str(tracking_id),
+                        confidence=person["confidence"],
+                        bounding_box=str(person["box"]),
+                        zone_status="Inside" if state["inside"] else "Outside",
+                    ))
                     if not state["event"]:
                         continue
                     evidence = save(frame, person, self.zone)
                     critical = state["event"] != "Boundary Approach"
-                    alert = Alert(camera_id=cam_id, person_tracking_id=str(tracking_id), event_type=state["event"],
-                                  severity="CRITICAL" if critical else "WARNING", confidence=person["confidence"],
-                                  zone_name=state["zone"], crossing_direction=state["direction"], evidence_path=evidence)
+                    alert = Alert(
+                        camera_id=cam_id,
+                        person_tracking_id=str(tracking_id),
+                        event_type=state["event"],
+                        severity="CRITICAL" if critical else "WARNING",
+                        confidence=person["confidence"],
+                        zone_name=state["zone"],
+                        crossing_direction=state["direction"],
+                        evidence_path=evidence,
+                    )
                     db.add(alert)
                     db.commit()
                     db.refresh(alert)
                     relative = Path(evidence).resolve().relative_to(Path(settings.evidence_dir).resolve()).as_posix()
-                    payload = {"id": alert.id, "camera_name": settings.camera_name, "nvr_name": settings.nvr_name,
-                               "location": settings.camera_location, "person_tracking_id": alert.person_tracking_id,
-                               "event_type": alert.event_type, "severity": alert.severity, "confidence": alert.confidence,
-                               "zone_name": alert.zone_name, "crossing_direction": alert.crossing_direction,
-                               "evidence_path": "/api/evidence/" + relative, "alert_status": alert.alert_status,
-                               "event_timestamp": datetime.now(timezone.utc).isoformat()}
+                    payload = {
+                        "id": alert.id, "camera_name": settings.camera_name,
+                        "nvr_name": settings.nvr_name, "location": settings.camera_location,
+                        "person_tracking_id": alert.person_tracking_id,
+                        "event_type": alert.event_type, "severity": alert.severity,
+                        "confidence": alert.confidence, "zone_name": alert.zone_name,
+                        "crossing_direction": alert.crossing_direction,
+                        "evidence_path": "/api/evidence/" + relative,
+                        "alert_status": alert.alert_status,
+                        "event_timestamp": datetime.now(timezone.utc).isoformat(),
+                    }
                     if critical:
                         self.crossings += 1
                     publish_from_thread(payload, critical)
                 db.commit()
 
-                # Broadcast headcount events only after the database commit.
+                # Broadcast headcount events after DB commit
                 for headcount_payload in headcount_payloads:
                     publish_from_thread(headcount_payload, False)
 
-                # ── Movement Security: Unauthorised Movement Detection ────────
+                # --- Use Case 3: Movement Security ---
                 try:
                     movement_events = self.movement_security.evaluate(
-                        people=people,
-                        camera_id=cam_id or 1,
-                        camera_name=settings.camera_name,
+                        people=people, camera_id=cam_id or 1, camera_name=settings.camera_name
                     )
                     for me in movement_events:
-                        # Save snapshot for movement security alert
                         snapshot_rel_path = None
                         try:
                             snap_dir = Path(settings.evidence_dir) / "movement"
                             snap_dir.mkdir(parents=True, exist_ok=True)
                             fname = f"movement_{int(me['timestamp'])}_{me['tracking_id']}.jpg"
-                            fpath = snap_dir / fname
-                            cv2.imwrite(str(fpath), frame)
+                            cv2.imwrite(str(snap_dir / fname), frame)
                             snapshot_rel_path = f"/api/evidence/movement/{fname}"
                         except Exception as snap_err:
                             log.debug("Could not save movement snapshot: %s", snap_err)
@@ -506,8 +568,6 @@ class CameraManager:
                         db.add(m_record)
                         db.commit()
                         db.refresh(m_record)
-
-                        # Broadcast real-time WebSocket alert
                         is_crit = me["severity"] in ("CRITICAL", "HIGH")
                         publish_from_thread({
                             "event_type": "Movement Security Alert",
@@ -526,7 +586,6 @@ class CameraManager:
                         }, is_crit)
                 except Exception as m_exc:
                     log.exception("Movement security processing failed: %s", m_exc)
-
 
         except Exception as exc:
             log.exception("Camera worker stopped")
@@ -554,7 +613,15 @@ class CameraManager:
             log.info("Camera worker stopped with status %s", self.status)
 
     def _run_in_camera(self):
-        """Dedicated worker for Gate 3 IN Camera (Channel 1)."""
+        """
+        Dedicated worker for Gate 3 IN Camera (Channel 1 — dual camera mode).
+        Counts people entering (IN direction) independently of Channel 2.
+
+        DEBUG: IN camera not counting?
+               → Check SOURCE_IN / RTSP_URL_IN / RTSP_CHANNEL_IN in .env.
+               → Check DUAL_GATE_CAMERAS=true in .env.
+               → Look for "Gate 3 IN camera processing failed" in logs.
+        """
         from main import publish_from_thread
 
         db = None
@@ -650,13 +717,10 @@ class CameraManager:
                             event_timestamp=event_timestamp,
                         ))
                         payloads.append({
-                            "event_type": "Headcount Event",
-                            "severity": "INFO",
+                            "event_type": "Headcount Event", "severity": "INFO",
                             "gate_name": event.get("gate_name", "Gate 3"),
-                            "camera_id": cam_id,
-                            "tracking_id": _evt_tid,
-                            "employee_name": _emp_name,
-                            "direction": "IN",
+                            "camera_id": cam_id, "tracking_id": _evt_tid,
+                            "employee_name": _emp_name, "direction": "IN",
                             "confidence": event.get("confidence"),
                             "event_timestamp": event_timestamp.isoformat(),
                         })
@@ -677,4 +741,5 @@ class CameraManager:
             self.in_status = "Stopped" if self.stop_event.is_set() else "Disconnected"
 
 
+# Singleton instance — imported by main.py
 camera_manager = CameraManager()
