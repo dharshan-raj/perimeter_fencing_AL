@@ -4,7 +4,7 @@ Measure face recognition accuracy on labelled images.
 Layout:  <root>/<employee_or_unknown>/*.jpg   (folder name = ground truth;
          use a folder named "unknown" for people who are NOT employees)
 
-  python scripts/evaluate_recognition.py --root backend/employee_face --skip 15 --limit 20
+  python scripts/evaluate_recognition.py --root shared/employee_face --skip 15 --limit 20
       -> evaluates photos NOT used for enrolment (skips the first 15 per person)
 
   python scripts/evaluate_recognition.py --root eval_frames --yolo
@@ -16,9 +16,9 @@ from pathlib import Path
 
 sys.path.insert(0, os.getcwd())
 import cv2
-from backend.config import settings
-from backend.face_recognition.employee_registry import EmployeeRegistry
-from backend.face_recognition.face_quality import prepare_person_crop, face_blur_score
+from shared.config import settings
+from shared.face_recognition.employee_registry import EmployeeRegistry
+from shared.face_recognition.face_quality import prepare_person_crop, face_blur_score
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--root", required=True)
@@ -29,7 +29,7 @@ ap.add_argument("--threshold", type=float, default=settings.face_match_threshold
 ap.add_argument("--margin", type=float, default=settings.face_match_margin)
 args = ap.parse_args()
 
-reg = EmployeeRegistry("backend/employee_face")
+reg = EmployeeRegistry("shared/employee_face")
 reg.load_employees(max_photos_per_employee=settings.face_max_photos)
 eng = reg.engine
 yolo = None

@@ -1,3 +1,12 @@
+# ============================================================
+# FILE: shared/face_recognition/track_identifier.py
+# PURPOSE: Multi-frame asynchronous face identity resolver per ByteTrack tracking ID
+# USE CASE: Shared Infrastructure (Face Recognition)
+# DEBUG TIPS:
+#   - Runs InsightFace on a background thread so YOLO + Headcount run at full FPS
+#   - Tune face_votes_required and face_min_person_height in shared/config.py
+# ============================================================
+
 """
 Multi-frame identity resolution for tracked people.
 

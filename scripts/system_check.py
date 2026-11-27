@@ -2,7 +2,7 @@ import socket, sqlite3, sys, os, json
 sys.path.insert(0, os.getcwd())
 
 print("== CAMERA REACHABILITY ==")
-from backend.config import settings
+from shared.config import settings
 print("source kind:", settings.source_kind, "| ip:", settings.rtsp_ip, "port:", settings.rtsp_port, "| face_v2:", settings.face_v2_enabled)
 try:
     s = socket.create_connection((settings.rtsp_ip, settings.rtsp_port), timeout=4); s.close()
@@ -22,8 +22,8 @@ print("recent system logs:", c.execute("select log_level,message,timestamp from 
 
 print("== API ENDPOINTS ==")
 from fastapi.testclient import TestClient
-from backend.main import app
-import backend.main as m
+from main import app
+import main as m
 # do not start the camera worker for this check
 settings.camera_auto_start = False
 with TestClient(app) as client:
@@ -42,11 +42,11 @@ with TestClient(app) as client:
             print("ERR", p, e)
 
 print("== GATE LINES ==")
-from backend.headcount.headcount_manager import HeadcountManager
+from entry_exit_headcount.headcount_manager import HeadcountManager
 h = HeadcountManager()
 print("two_lines:", h.two_lines, "IN:", h.line_in_start, h.line_in_end, "OUT:", h.line_out_start, h.line_out_end)
 
 print("== FACE REGISTRY (cache) ==")
-from backend.face_recognition.embedding_cache import list_employee_photos
-print({k: len(v) for k, v in list_employee_photos("backend/employee_face").items()})
-print("cache file exists:", os.path.exists("backend/employee_face/.embeddings_cache.npz"))
+from shared.face_recognition.embedding_cache import list_employee_photos
+print({k: len(v) for k, v in list_employee_photos("shared/employee_face").items()})
+print("cache file exists:", os.path.exists("shared/employee_face/.embeddings_cache.npz"))

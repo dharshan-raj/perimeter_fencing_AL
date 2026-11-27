@@ -1,7 +1,7 @@
 import numpy as np
 
-from backend.camera.rtsp_stream import RTSPStream
-from backend.config import settings
+from shared.camera.rtsp_stream import RTSPStream
+from shared.config import settings
 
 
 def test_retry_delay_doubles_and_caps(monkeypatch):
@@ -32,7 +32,7 @@ def test_successful_frame_resets_retry_backoff(monkeypatch):
             pass
 
     capture = Capture()
-    monkeypatch.setattr("backend.camera.rtsp_stream.cv2.VideoCapture", lambda *args: capture)
+    monkeypatch.setattr("shared.camera.rtsp_stream.cv2.VideoCapture", lambda *args: capture)
     monkeypatch.setattr(settings, "camera_open_timeout", 1000)
     monkeypatch.setattr(settings, "camera_read_timeout", 1000)
     stream = RTSPStream("rtsp://camera.example/stream", "rtsp")
@@ -64,7 +64,7 @@ def test_failed_frame_releases_capture_and_schedules_retry(monkeypatch):
             self.released = True
 
     capture = Capture()
-    monkeypatch.setattr("backend.camera.rtsp_stream.cv2.VideoCapture", lambda *args: capture)
+    monkeypatch.setattr("shared.camera.rtsp_stream.cv2.VideoCapture", lambda *args: capture)
     monkeypatch.setattr(settings, "camera_open_timeout", 1000)
     monkeypatch.setattr(settings, "camera_read_timeout", 1000)
     monkeypatch.setattr(settings, "camera_reconnect_delay", 3.0)
@@ -97,7 +97,7 @@ def test_stream_recovers_after_a_failed_open(monkeypatch):
             pass
 
     attempts = iter([Capture(False), Capture(True)])
-    monkeypatch.setattr("backend.camera.rtsp_stream.cv2.VideoCapture", lambda *args: next(attempts))
+    monkeypatch.setattr("shared.camera.rtsp_stream.cv2.VideoCapture", lambda *args: next(attempts))
     monkeypatch.setattr(settings, "camera_open_timeout", 1000)
     monkeypatch.setattr(settings, "camera_read_timeout", 1000)
     monkeypatch.setattr(settings, "camera_reconnect_delay", 3.0)

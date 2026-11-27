@@ -1,3 +1,12 @@
+# ============================================================
+# FILE: shared/face_recognition/insightface_engine.py
+# PURPOSE: Wraps InsightFace buffalo_l ONNX models for face detection, embedding, and cosine matching
+# USE CASE: Shared Infrastructure (Face Recognition)
+# DEBUG TIPS:
+#   - Loads buffalo_l models from local models/.insightface/ to avoid Windows user-dir WinError 5
+#   - Tune face_match_threshold in shared/config.py if matches are too strict or too loose
+# ============================================================
+
 
 import cv2
 import numpy as np

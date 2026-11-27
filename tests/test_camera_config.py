@@ -1,4 +1,4 @@
-from backend.config import settings
+from shared.config import settings
 
 def test_video_source_selects_rtsp_or_webcam(monkeypatch):
     monkeypatch.setattr(settings, "video_source", "rtsp")

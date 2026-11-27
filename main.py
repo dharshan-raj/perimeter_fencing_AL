@@ -1,3 +1,12 @@
+# ============================================================
+# FILE: main.py
+# PURPOSE: FastAPI application entry point: REST APIs, MJPEG live stream, WebSocket alerts, and lifespan
+# USE CASE: Root Application Entry Point
+# DEBUG TIPS:
+#   - Run with: .venv\\Scripts\\python.exe -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+#   - Live video stream: http://localhost:8000/api/stream.mjpg | Health: /api/health
+# ============================================================
+
 
 import asyncio
 import logging
@@ -23,19 +32,18 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 
-from .config import settings
-from .database import Base, engine, get_db, SessionLocal
-from . import models
-from .schemas import (
+from shared.config import settings
+from shared.database import Base, engine, get_db, SessionLocal
+from shared import models
+from shared.schemas import (
     HeadcountEventCreate,
     MovementEventCreate,
     MovementEventResponse,
     MovementSummaryResponse,
 )
-from .camera.camera_manager import camera_manager
-from .detection.zone_manager import ZoneManager
-from .services.websocket_manager import manager
-from .services.notification_service import send_ntfy
+from shared.camera.camera_manager import camera_manager
+from perimeter_fencing.zone_manager import ZoneManager
+from shared.services.websocket_manager import manager
 
 
 # =========================================================
@@ -63,14 +71,11 @@ def _utc_isoformat(value: datetime | None) -> str | None:
 
 
 # =========================================================
-# WEBSOCKET + NOTIFICATION PUBLISHING
+# WEBSOCKET PUBLISHING
 # =========================================================
 
 async def publish(payload, notify=False):
     await manager.broadcast(payload)
-
-    if notify and payload.get("severity") == "CRITICAL":
-        await send_ntfy(payload)
 
 
 def publish_from_thread(payload, notify=False):

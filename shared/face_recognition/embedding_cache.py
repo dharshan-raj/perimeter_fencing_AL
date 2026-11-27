@@ -1,3 +1,12 @@
+# ============================================================
+# FILE: shared/face_recognition/embedding_cache.py
+# PURPOSE: Caches computed 512-D employee face embeddings to .embeddings_cache.npz for fast startup
+# USE CASE: Shared Infrastructure (Face Recognition)
+# DEBUG TIPS:
+#   - Cache auto-invalidates whenever photos are added or modified in shared/employee_face/
+#   - Delete .embeddings_cache.npz to force a full re-extraction
+# ============================================================
+
 """Disk cache for enrolled employee embeddings so startup does not re-embed every photo."""
 import hashlib
 import logging

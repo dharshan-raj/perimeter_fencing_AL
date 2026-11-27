@@ -1,3 +1,11 @@
+# ============================================================
+# FILE: shared/face_recognition/train_employee_faces.py
+# PURPOSE: Offline utility script to train and inspect employee face embeddings from photos
+# USE CASE: Shared Infrastructure (Face Recognition)
+# DEBUG TIPS:
+#   - Reads employee folders from shared/employee_face/
+# ============================================================
+
 
 from pathlib import Path
 import cv2
@@ -13,13 +21,13 @@ from insightface.app import FaceAnalysis
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 
-EMPLOYEE_DIR = BASE_DIR / "backend" / "employee_face"
+EMPLOYEE_DIR = BASE_DIR / "shared" / "employee_face"
 
-OUTPUT_DIR = BASE_DIR / "backend" / "face_recognition"
+OUTPUT_DIR = BASE_DIR / "shared" / "face_recognition"
 
-OUTPUT_FILE = OUTPUT_DIR / "C:\Perimeter Fencing\backend\face_recognition\employee_embeddings.npz"
+OUTPUT_FILE = OUTPUT_DIR / "employee_embeddings.npz"
 
-LABEL_FILE = OUTPUT_DIR / "C:\Perimeter Fencing\backend\face_recognition\employee_labels.json"
+LABEL_FILE = OUTPUT_DIR / "employee_labels.json"
 
 
 # -------------------------------------------------

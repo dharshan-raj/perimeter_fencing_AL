@@ -1,3 +1,11 @@
+# ============================================================
+# FILE: shared/face_recognition/face_quality.py
+# PURPOSE: Crops upper-body head regions, upscales small crops, and computes Laplacian blur scores
+# USE CASE: Shared Infrastructure (Face Recognition)
+# DEBUG TIPS:
+#   - Tune face_min_person_height and face_min_blur in shared/config.py for distant CCTV views
+# ============================================================
+
 """Helpers that decide whether a CCTV face observation is good enough to trust."""
 import cv2
 import numpy as np

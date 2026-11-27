@@ -1,7 +1,7 @@
 
 import pytest
 
-from backend.headcount.line_counter import LineCounter
+from entry_exit_headcount.line_counter import LineCounter
 
 
 @pytest.fixture
@@ -287,7 +287,7 @@ def test_invalid_gate_line():
 def test_two_lines_in_and_out():
     """Verify that HeadcountManager detects IN on line_in and OUT on line_out."""
     import numpy as np
-    from backend.headcount.headcount_manager import HeadcountManager
+    from entry_exit_headcount.headcount_manager import HeadcountManager
 
     manager = HeadcountManager(
         gate_name="Gate 3",

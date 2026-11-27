@@ -1,3 +1,12 @@
+# ============================================================
+# FILE: shared/face_recognition/employee_registry.py
+# PURPOSE: Loads enrolled employee folders from shared/employee_face/ and matches query face crops
+# USE CASE: Shared Infrastructure (Face Recognition)
+# DEBUG TIPS:
+#   - Place employee face photos under shared/employee_face/<employee_name>/*.jpg
+#   - If 0 employees load: check folder path and InsightFace model permissions
+# ============================================================
+
 
 from pathlib import Path
 import cv2
@@ -7,10 +16,10 @@ from . import embedding_cache
 
 
 class EmployeeRegistry:
-    def __init__(self, photos_dir="backend/employee_face"):
+    def __init__(self, photos_dir="shared/employee_face"):
         p = Path(photos_dir)
         if not p.exists():
-            for alt in ["backend/employee_face", "employee_faces", "employee_face"]:
+            for alt in ["shared/employee_face", "employee_faces", "employee_face"]:
                 if Path(alt).exists():
                     p = Path(alt)
                     break
