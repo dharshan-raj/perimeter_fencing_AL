@@ -1,4 +1,4 @@
-import { Activity, Camera, Images, MapPinned, Settings2, ShieldCheck, ShieldAlert, Users } from 'lucide-react';
+import { Activity, Camera, Images, MapPinned, ShieldCheck, ShieldAlert, Users } from 'lucide-react';
 
 const items = [
   { id: 'dashboard', label: 'Dashboard', icon: Activity },
@@ -7,7 +7,6 @@ const items = [
   { id: 'headcount', label: 'Gate 3 Headcount', icon: Users },
   { id: 'zones', label: 'Restricted zones', icon: MapPinned },
   { id: 'evidence', label: 'Evidence', icon: Images },
-  { id: 'settings', label: 'Settings', icon: Settings2 },
 ];
 
 export default function Sidebar({ active, onNavigate }) {

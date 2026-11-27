@@ -51,10 +51,6 @@ const pageTitles = {
     'Incident evidence',
     'Captured images associated with security alerts.',
   ],
-  settings: [
-    'System settings',
-    'Connection state and local administrative access.',
-  ],
 };
 
 
@@ -226,73 +222,6 @@ function EvidenceGallery({ alerts }) {
           </span>
         </div>
       )}
-    </div>
-  );
-}
-
-
-// ---------------------------------------------------------
-// SETTINGS PANEL
-// ---------------------------------------------------------
-
-function SettingsPanel({
-  status,
-  videoStatus,
-  activeSource,
-  processing,
-  sourceConfigured,
-}) {
-  return (
-    <div className="settings-grid">
-      <section className="panel settings-card">
-        <div className="panel-heading">
-          <div>
-            <span className="section-kicker">CAMERA CONNECTION</span>
-            <h2>Camera 14 · NVR 2</h2>
-          </div>
-          <Camera size={18} className="settings-icon" />
-        </div>
-
-        <dl className="settings-list">
-          <div>
-            <dt>Camera state</dt>
-            <dd className={`text-${status.toLowerCase()}`}>{status}</dd>
-          </div>
-
-          <div>
-            <dt>Video stream</dt>
-            <dd
-              className={
-                videoStatus === 'Connected'
-                  ? 'text-connected'
-                  : 'text-disconnected'
-              }
-            >
-              {videoStatus}
-            </dd>
-          </div>
-
-          <div>
-            <dt>Processing worker</dt>
-            <dd>{processing ? 'Running' : 'Stopped'}</dd>
-          </div>
-
-          <div>
-            <dt>Source type</dt>
-            <dd>{activeSource || 'Not selected'}</dd>
-          </div>
-
-          <div>
-            <dt>Source configured</dt>
-            <dd>{sourceConfigured ? 'Yes' : 'No'}</dd>
-          </div>
-        </dl>
-
-        <p className="form-help">
-          Set RTSP_URL or the local camera source in the backend .env file.
-          Stream credentials stay on the backend.
-        </p>
-      </section>
     </div>
   );
 }
@@ -920,14 +849,6 @@ export default function App() {
             </span>
 
             <button
-              className="button-secondary"
-              onClick={() => setPage('headcount')}
-            >
-              <Users size={15} />
-              Gate 3
-            </button>
-
-            <button
               className="mobile-refresh"
               onClick={() => refresh(true)}
               aria-label="Refresh dashboard"
@@ -1127,17 +1048,6 @@ export default function App() {
           )}
 
 
-          {/* SETTINGS */}
-
-          {page === 'settings' && (
-            <SettingsPanel
-              status={status}
-              videoStatus={videoStatus}
-              activeSource={activeSource}
-              processing={processing}
-              sourceConfigured={sourceConfigured}
-            />
-          )}
 
 
           <footer className="app-footer">
